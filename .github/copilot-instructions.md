@@ -1,6 +1,6 @@
 # Kodex AI Copilot Instructions
 
-Kodex is a **text replacement/substitution application for Windows** written in AutoHotkey v1. It monitors keyboard input and replaces typed hotstrings with predefined replacements.
+Kodex is a **text replacement/substitution application for Windows** written in **AutoHotkey v2**. It monitors keyboard input and replaces typed hotstrings with predefined replacements.
 
 ## Architecture Overview
 
@@ -27,11 +27,11 @@ Kodex is a **text replacement/substitution application for Windows** written in 
 - Hex encoding prevents filename issues (e.g., hotstring "foo:bar" → filename with hex equivalent)
 
 ### Key Functions (in `includes/functions/`)
-- `Hexify(string)` / `DeHexify(hex)` → Convert strings to/from hex for filenames
-- `SaveHotstring()` → Validates input, writes file, updates CSV banks, triggers `BuildActive`
-- `DeleteHotstring()` → Removes file and removes from all CSV banks
-- `BuildActive()` → Compiles enabled bundles into Active/ directory (called after any hotstring change)
-- `AddToBank()` / `DelFromBank()` → Manage CSV trigger mappings
+- `Hexify(string)` / `DeHexify(hex)` → Convert strings to/from hex for filenames (v2 functions with Format and StrLen)
+- `SaveHotstring(hotstring, replacement, trigger, bundleName)` → Validates input, writes file, updates CSV banks, triggers `BuildActive()`
+- `DeleteHotstring(hotstring, bundleName)` → Removes file and removes from all CSV banks
+- `BuildActive()` → Compiles enabled bundles into Active/ directory via LoopFiles iteration (called after any hotstring change)
+- `AddToBank(hotstring, trigger, bundleName)` / `DelFromBank(hotstring, trigger, bundleName)` → Manage CSV trigger mappings
 
 ### Configuration
 - **kodex.ini**: INI file with sections: `[Bundles]` (enable/disable bundles), `[Triggers]` (Space/Tab/Enter/NoTrig defaults)
@@ -39,28 +39,31 @@ Kodex is a **text replacement/substitution application for Windows** written in 
 - Settings read on startup via `IniRead` commands in initialization subroutines
 
 ### GUI Structure
-- GUIs use numbered windows (Gui,2: for management, etc.)
-- Menu bars built dynamically in `management_GUI.ahk` (Tools, Bundles, Help menus)
-- ListBox controls populated from file lists; right-click context menus for editing
+- GUIs created via `GuiCreate()` objects (v2 pattern)
+- Callback handlers use `OnEvent()` method (e.g., `MyGui.Show("auto", "Title")` with `MyGui.Button := ButtonHandler`)
+- Main management GUI in `management_GUI.ahk`: ManageGUI() function with tab control and ListBox
+- All supplemental GUIs (newkey, preferences, help, about, traymenu, textprompt) follow same v2 GuiCreate pattern
 
 ## Workflow Commands
 
 **Building/Running:**
-- Script must be run with AutoHotkey interpreter (`AutoHotkey.exe kodex.ahk`)
-- Initialization happens in `kodex.ahk` top-level via `Gosub` calls: ASSIGNVARS → RESOURCES → READINI → TRAYMENU → BuildActive
+- Script must be run with AutoHotkey v2 interpreter (`AutoHotkey.exe kodex.ahk`)
+- Initialization happens in `kodex.ahk` via function calls: AssignVars() → ReadINI() → TrayMenu_Init() → BuildActive()
+- Main loop uses `Input()` function (v2 return-value style) with character-by-character hotstring matching
 - KodexInstaller.ahk packages the application for distribution
 
 **Supplementary Tools:**
-- `export.ahk` / `import.ahk` → Export selected hotstrings or import from zip bundles
-- `printable.ahk` → Generate printable reference list of hotstrings
+- `export.ahk` / `import.ahk` → ExportUtility() / ImportUtility() functions with GUI wrappers
+- `printable.ahk` → PrintableList() generates HTML reference cheatsheet
+- `smoke_test.ahk` → Validates core functionality with 8 test suites
 
 ## Key Development Constraints
 
-1. **No Delay Keystrokes**: `SetKeyDelay,-1` is set for performance (replacements fire immediately)
-2. **Case-Sensitive Strings**: `StringCaseSense On` → hotstrings are case-sensitive by default
-3. **AutoTrim Off**: Leading/trailing spaces in replacements are preserved
+1. **No Delay Keystrokes**: `SetKeyDelay(-1)` is set for performance (replacements fire immediately)
+2. **Case-Sensitive Strings**: `StringCaseSense("On")` → hotstrings are case-sensitive by default
+3. **AutoTrim Off**: `AutoTrim(false)` → Leading/trailing spaces in replacements are preserved
 4. **Special Keys State**: Code manages Shift key state to prevent it from "sticking" after rapid replacement firing
-5. **AutoCorrect / AutoClose**: Currently disabled (commented in main loop) but infrastructure exists in `includes/functions/`
+5. **AutoCorrect / AutoClose**: Currently disabled but infrastructure exists in `includes/functions/`
 
 ## Integration Points
 
@@ -81,39 +84,52 @@ Kodex is a **text replacement/substitution application for Windows** written in 
 
 ## Notes for AI Agents
 
-- This is **AutoHotkey v1 syntax** (not v2)—variable references use `%varname%`, no `var1.var2` dot notation
-- The `Input` command is the core of hotstring detection; understand its `EndKey` behavior
+- This is **AutoHotkey v2 syntax**—variable references use direct variables (`var`), not `%varname%` dereferencing
+- The `Input()` function (v2 return-value style) is the core of hotstring detection; understand its EndKey behavior
 - Hex encoding is non-negotiable for filenames; any new hotstring storage must use `Hexify()`
-- `BuildActive` is the critical rebuild step—any data structure change requires rebuilding
-- GUIs are stateful; destroying and recreating is the pattern (e.g., `Gui,2: Destroy`)
+- `BuildActive()` is the critical rebuild step—any data structure change requires rebuilding
+- GUIs use `GuiCreate()` objects with `OnEvent()` callbacks; destroying and recreating is the pattern
 - Test changes with actual keyboard input; the app relies on Windows Input API timing
+- File I/O operations (`IniRead`, `FileRead`) should be wrapped in `try/catch` for error handling
 
-## Migration to AutoHotkey v2 (planned)
+## AutoHotkey v2 Migration - COMPLETE ✓
 
-- Status: migration to AHK v2 approved; core research completed and migration TODOs tracked in project TODOs.
-- Why migrate: modern syntax, improved object model, and a chance to refactor `Gosub` labels into functions for clearer control flow.
-- High-impact changes to expect:
-	- Replace `%var%` references with direct variables (`var`) and update all string concatenations.
-	- Convert label-based `Gosub`/`Return` flow into proper functions (e.g., `BuildActive()` instead of `BuildActive:`).
-	- Update `Input` uses to v2 return-style (`result := Input(...)`).
-	- Replace `IniRead`/`IniWrite` calls with function form (`IniRead(file, section, key, default)`).
-	- Rework all `Gui, N:` usages to `GuiCreate()` objects and callbacks.
+**Status**: Full v2 migration completed (January 2026). All 18 core files converted and deployed.
 
-- Recommended migration order (minimal risk):
-	1. Convert standalone helper functions in `includes/functions/` (`hexify.ahk`, `savehotstring.ahk`, `buildactive.ahk`).
-	2. Migrate `kodex.ahk` main initialization and input loop.
-	3. Migrate GUI files in `includes/GUI/` (management, newkey, preferences, help, about).
-	4. Migrate supplemental scripts (`export.ahk`, `import.ahk`, `printable.ahk`, `KodexInstaller.ahk`).
-	5. Run full end-to-end tests with real keyboard input and bundle switching.
+**Migration Summary:**
+- **Helper Functions** (7 files): hexify.ahk, savehotstring.ahk, buildactive.ahk, addtobank.ahk, delfrombank.ahk, getfilelist.ahk, renamehotstring.ahk, getvalfromini.ahk
+- **Main Script**: kodex.ahk (563 lines) - Input loop, function-based architecture, global variable management
+- **GUI Files** (8 files): management_GUI.ahk, newkey_GUI.ahk, preferences_GUI.ahk, help_GUI.ahk, about_GUI.ahk, traymenu_GUI.ahk, textprompt_GUI.ahk, disablechecks.ahk
+- **Utility Scripts** (3 files): export.ahk, import.ahk, printable.ahk
+- **Installer**: KodexInstaller.ahk
+- **Testing**: smoke_test.ahk (8 test suites)
 
-- Quick migration checklist examples:
-	- `IniRead, val, file, section, key`  →  `val := IniRead(file, section, key)`
-	- `Gosub, SomeLabel` / `SomeLabel:`  →  `SomeFunction()` / `SomeFunction() { ... }`
-	- `Input, out, T3000`  →  `out := Input(, 3000)` with `try/catch` for interruptions
+**Key v2 Conversions Applied:**
+- Variable syntax: `%var%` → `var`
+- Command syntax: `Gui,N:` → `GuiCreate()` objects; `SetKeyDelay,-1` → `SetKeyDelay(-1)`
+- Event handlers: g-labels → `OnEvent()` callbacks
+- File I/O: `FileRead` → `FileRead()` function; `IfExist` → `FileExist()`
+- Control flow: `Gosub` → function calls; `Input` command → `Input()` return-value style
+- Error handling: added `try/catch` for `IniRead`/`FileRead` operations
+- Loops: `Loop Files` → `LoopFiles()` with object properties (`.Name`, `.FullPath`)
+- String operations: `StrReplace`, `InStr` preferred over v1's "in" operator
 
-- Tests to perform after each phase:
-	- Verify `Active\bank\*.csv` contains expected entries after `SaveHotstring()`.
-	- Confirm hotstrings trigger correctly for `Space`, `Tab`, `Enter`, and `NoTrig` modes.
-	- Validate `::scr::` script execution paths.
+**Testing & Validation:**
+- Created `smoke_test.ahk` with 8 test suites (directory structure, Active directory, Hexify/DeHexify, hotstring lifecycle, CSV banks, INI file)
+- Covers core workflows: create hotstring → trigger → delete → rebuild
+- Validates CSV trigger mappings and Active directory compilation
+- Test log output: `test_results.log`
 
-If you'd like, I can start converting `includes/functions/hexify.ahk` → v2 now and show a minimal working example.
+**Migration Checklist Examples for Future Enhancements:**
+- `IniRead, val, file, section, key`  →  `val := IniRead(file, section, key)`
+- `Gosub, SomeLabel` / `SomeLabel:`  →  `SomeFunction()` / `SomeFunction() { ... }`
+- `Input, out, T3000`  →  `out := Input(, 3000)` with `try/catch` for interruptions
+- `Loop Files, pattern`  →  `for file in LoopFiles(pattern)` with `file.Name`, `file.FullPath`
+- `GuiControl,,ControlID,NewValue`  →  `MyGui[ControlID].Value := NewValue`
+
+**Known Differences from v1:**
+- `IniRead()` throws exceptions instead of setting ErrorLevel
+- `FileExist()` / `DirExist()` return true/false directly
+- `LoopFiles()` returns file objects, not string concatenation
+- GUI controls accessed via `MyGui[name].Value` property (simpler than GuiControlGet)
+- Shift key state management logic preserved from v1 (no changes needed)
