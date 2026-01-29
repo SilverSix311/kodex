@@ -14,10 +14,23 @@ Kodex is a powerful hotstring replacement engine that monitors your keyboard inp
 
 ## Quick Start
 
-1. **Run Kodex**: Execute `kodex.ahk` with AutoHotkey v2
-2. **Open Management GUI**: Press `Ctrl+Alt+K` to open the hotstring manager
-3. **Add a Hotstring**: Enter a trigger phrase, replacement text, and select a trigger type
-4. **Use It**: Start typing—your hotstrings will expand automatically
+### Option A: Download Executable
+1. Download `kodex.exe` from [GitHub Releases](https://github.com/SilverSix311/kodex/releases)
+2. Install [AutoHotkey v2](https://www.autohotkey.com/)
+3. Run `kodex.exe`
+4. Press `Ctrl+Alt+K` to open the hotstring manager
+
+### Option B: Run from Source
+1. Clone this repository: `git clone https://github.com/SilverSix311/kodex.git`
+2. Install [AutoHotkey v2](https://www.autohotkey.com/)
+3. Run: `AutoHotkey.exe kodex.ahk`
+4. Press `Ctrl+Alt+K` to open the hotstring manager
+
+### Using Kodex
+1. **Add a Hotstring**: Click "New Hotstring" in the manager
+2. **Enter Details**: Type phrase, replacement, select trigger type
+3. **Start Typing**: Your hotstrings expand automatically!
+4. **Manage**: Edit, delete, or organize into bundles
 
 ## Features
 
@@ -31,7 +44,8 @@ Kodex is a powerful hotstring replacement engine that monitors your keyboard inp
 ## Recent Migration to AutoHotkey v2 ✓
 
 **Date**: January 2026  
-**Status**: Complete
+**Status**: Complete  
+**Version**: 2.0.0
 
 All 18 core scripts have been migrated from AutoHotkey v1 to v2. Key improvements:
 
@@ -40,8 +54,27 @@ All 18 core scripts have been migrated from AutoHotkey v1 to v2. Key improvement
 - `GuiCreate()` objects with event callbacks for improved GUI code
 - Enhanced error handling with `try/catch` for file operations
 - `LoopFiles()` integration for robust file iteration
+- New Freshdesk ticket time tracker feature
+
+**Downloads**: [Latest Release](https://github.com/SilverSix311/kodex/releases/latest)
 
 See [.github/copilot-instructions.md](.github/copilot-instructions.md) for detailed v2 migration notes and API reference.
+
+## Releases & Downloads
+
+| Version | Release Date | Status | Download |
+|---------|--------------|--------|----------|
+| **2.0.0** | January 29, 2026 | ✅ Current | [kodex-v2.0.0.zip](https://github.com/SilverSix311/kodex/releases/latest) |
+| 1.x | Previous | Deprecated | [Archive](https://github.com/SilverSix311/kodex/releases) |
+
+**Installation Options**:
+1. **Standalone Executable**: Download `kodex.exe` from releases
+2. **Full Package**: Download `kodex-v2.0.0.zip` with documentation
+3. **Build from Source**: Clone repo and run `AutoHotkey.exe kodex.ahk`
+
+See [RELEASE_GUIDE.md](RELEASE_GUIDE.md) for building and packaging instructions.
+
+## Recent Migration to AutoHotkey v2 ✓
 
 ## Testing
 
