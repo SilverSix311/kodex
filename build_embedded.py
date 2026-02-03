@@ -1,0 +1,190 @@
+"""Build script — packages Kodex with embedded Python for Windows.
+
+This script downloads an embedded Python runtime and creates a portable
+distribution structure:
+
+    kodex/
+    ├── python/           ← Embedded Python runtime
+    │   ├── python.exe
+    │   ├── python311.dll
+    │   ├── Lib/
+    │   └── ...
+    ├── app/              ← Kodex source code
+    │   └── kodex_py/
+    ├── data/             ← User data (created on first run)
+    │   └── kodex.db
+    ├── kodex.bat         ← Launcher script
+    └── kodex-gui.vbs     ← No-console launcher
+
+Run on a Windows machine:
+    python build_embedded.py
+
+Requirements:
+    - Windows 10+ (or any Windows with Python 3.11+)
+    - Internet connection (to download embedded Python)
+"""
+
+from __future__ import annotations
+
+import os
+import shutil
+import subprocess
+import sys
+import urllib.request
+import zipfile
+from pathlib import Path
+
+# ── Configuration ───────────────────────────────────────────────────
+
+PYTHON_VERSION = "3.11.9"
+PYTHON_EMBED_URL = f"https://www.python.org/ftp/python/{PYTHON_VERSION}/python-{PYTHON_VERSION}-embed-amd64.zip"
+PIP_URL = "https://bootstrap.pypa.io/get-pip.py"
+
+BUILD_DIR = Path("build")
+DIST_DIR = Path("dist/kodex")
+
+# Dependencies to install into the embedded runtime
+DEPENDENCIES = [
+    "pynput>=1.7.6",
+    "pystray>=0.19.5",
+    "Pillow>=10.0.0",
+    "pyperclip>=1.8.2",
+    "click>=8.1.0",
+]
+
+
+def main():
+    print("=" * 60)
+    print("  Kodex Embedded Python Build")
+    print("=" * 60)
+
+    # Clean
+    if DIST_DIR.exists():
+        print(f"\n→ Cleaning {DIST_DIR}...")
+        shutil.rmtree(DIST_DIR)
+    DIST_DIR.mkdir(parents=True)
+
+    BUILD_DIR.mkdir(exist_ok=True)
+
+    # 1. Download embedded Python
+    embed_zip = BUILD_DIR / f"python-{PYTHON_VERSION}-embed-amd64.zip"
+    if not embed_zip.exists():
+        print(f"\n→ Downloading Python {PYTHON_VERSION} embedded...")
+        urllib.request.urlretrieve(PYTHON_EMBED_URL, embed_zip)
+    else:
+        print(f"\n→ Using cached Python embed: {embed_zip}")
+
+    # 2. Extract embedded Python
+    python_dir = DIST_DIR / "python"
+    print(f"\n→ Extracting to {python_dir}...")
+    with zipfile.ZipFile(embed_zip, "r") as zf:
+        zf.extractall(python_dir)
+
+    # 3. Enable pip in embedded Python
+    # The embedded Python has a python3XX._pth file that restricts imports.
+    # We need to uncomment the "import site" line.
+    pth_files = list(python_dir.glob("python*._pth"))
+    for pth in pth_files:
+        content = pth.read_text()
+        content = content.replace("#import site", "import site")
+        # Also add our app directory
+        content += "\n../app\n"
+        pth.write_text(content)
+        print(f"  Patched {pth.name}")
+
+    # 4. Install pip
+    get_pip = BUILD_DIR / "get-pip.py"
+    if not get_pip.exists():
+        print("\n→ Downloading get-pip.py...")
+        urllib.request.urlretrieve(PIP_URL, get_pip)
+
+    python_exe = python_dir / "python.exe"
+    print("\n→ Installing pip...")
+    subprocess.run(
+        [str(python_exe), str(get_pip), "--no-warn-script-location"],
+        check=True,
+    )
+
+    # 5. Install dependencies
+    print("\n→ Installing dependencies...")
+    for dep in DEPENDENCIES:
+        print(f"  Installing {dep}...")
+        subprocess.run(
+            [str(python_exe), "-m", "pip", "install", dep, "--no-warn-script-location"],
+            check=True,
+        )
+
+    # 6. Copy app source
+    app_dir = DIST_DIR / "app"
+    src_dir = Path("src/kodex_py")
+    print(f"\n→ Copying source to {app_dir}...")
+    shutil.copytree(src_dir, app_dir / "kodex_py")
+
+    # Also copy resources if they exist
+    resources_src = Path("resources")
+    if resources_src.exists():
+        shutil.copytree(resources_src, DIST_DIR / "data" / "resources")
+
+    # 7. Create data directory
+    data_dir = DIST_DIR / "data"
+    data_dir.mkdir(exist_ok=True)
+    (data_dir / "timeTracker").mkdir(exist_ok=True)
+
+    # 8. Create launcher scripts
+    print("\n→ Creating launcher scripts...")
+
+    # kodex.bat — console launcher
+    bat_content = '''@echo off
+setlocal
+set "KODEX_DIR=%~dp0"
+set "PYTHONPATH=%KODEX_DIR%app"
+set "KODEX_DB=%KODEX_DIR%data\\kodex.db"
+
+REM Run Kodex
+"%KODEX_DIR%python\\python.exe" -m kodex_py.cli --db "%KODEX_DB%" %*
+'''
+    (DIST_DIR / "kodex.bat").write_text(bat_content, encoding="utf-8")
+
+    # kodex-run.bat — run the engine (GUI mode)
+    run_bat = '''@echo off
+setlocal
+set "KODEX_DIR=%~dp0"
+set "PYTHONPATH=%KODEX_DIR%app"
+set "KODEX_DB=%KODEX_DIR%data\\kodex.db"
+
+REM Run Kodex engine with tray icon
+"%KODEX_DIR%python\\pythonw.exe" -m kodex_py.cli --db "%KODEX_DB%" run
+'''
+    (DIST_DIR / "kodex-run.bat").write_text(run_bat, encoding="utf-8")
+
+    # kodex-gui.vbs — no-console launcher (hides the terminal window)
+    vbs_content = '''Set WshShell = CreateObject("WScript.Shell")
+kodexDir = Replace(WScript.ScriptFullName, WScript.ScriptName, "")
+WshShell.Run Chr(34) & kodexDir & "python\\pythonw.exe" & Chr(34) & _
+    " -m kodex_py.cli --db " & Chr(34) & kodexDir & "data\\kodex.db" & Chr(34) & " run", 0, False
+'''
+    (DIST_DIR / "kodex-gui.vbs").write_text(vbs_content, encoding="utf-8")
+
+    # 9. Create __main__.py for module execution
+    main_py = '''"""Entry point for python -m kodex_py.cli"""
+from kodex_py.cli import cli
+cli()
+'''
+    (app_dir / "kodex_py" / "__main__.py").write_text(main_py, encoding="utf-8")
+
+    # 10. Summary
+    total_size = sum(f.stat().st_size for f in DIST_DIR.rglob("*") if f.is_file())
+    print("\n" + "=" * 60)
+    print("  Build complete!")
+    print(f"  Output: {DIST_DIR.resolve()}")
+    print(f"  Size:   {total_size / 1024 / 1024:.1f} MB")
+    print()
+    print("  To run:")
+    print(f"    {DIST_DIR / 'kodex.bat'} list        (CLI)")
+    print(f"    {DIST_DIR / 'kodex-run.bat'}          (Engine + tray)")
+    print(f"    {DIST_DIR / 'kodex-gui.vbs'}          (Silent launch)")
+    print("=" * 60)
+
+
+if __name__ == "__main__":
+    main()
