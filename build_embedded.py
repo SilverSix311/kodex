@@ -53,6 +53,92 @@ DEPENDENCIES = [
 ]
 
 
+def _copy_tkinter(python_dir: Path) -> None:
+    """Copy tkinter and its dependencies from the system Python into the embedded runtime.
+
+    The embedded Python distribution doesn't include tkinter. We need:
+      1. The `tkinter` package (Python source) → Lib/tkinter/
+      2. The `_tkinter` C extension (.pyd) → _tkinter.pyd
+      3. The Tcl/Tk DLLs (tcl86t.dll, tk86t.dll) → DLLs/ or root
+      4. The Tcl/Tk library files (scripts, themes) → tcl/ or Lib/
+    """
+    import sysconfig
+    import glob
+
+    # Find the system Python's tkinter
+    stdlib = Path(sysconfig.get_path("stdlib"))
+    platstdlib = Path(sysconfig.get_path("platstdlib"))
+    # DLLs dir on Windows
+    dlls_dir = platstdlib / "DLLs" if (platstdlib / "DLLs").exists() else stdlib.parent / "DLLs"
+
+    # 1. Copy tkinter package
+    tkinter_src = stdlib / "tkinter"
+    if not tkinter_src.exists():
+        print("  WARNING: tkinter not found in system Python — GUI will not work!")
+        return
+
+    tkinter_dst = python_dir / "Lib" / "tkinter"
+    tkinter_dst.parent.mkdir(parents=True, exist_ok=True)
+    if tkinter_dst.exists():
+        shutil.rmtree(tkinter_dst)
+    shutil.copytree(tkinter_src, tkinter_dst)
+    print(f"  Copied tkinter package → {tkinter_dst}")
+
+    # 2. Copy _tkinter.pyd (C extension)
+    embed_dlls = python_dir / "DLLs"
+    embed_dlls.mkdir(exist_ok=True)
+
+    for search_dir in [dlls_dir, platstdlib, stdlib.parent]:
+        for pyd in search_dir.glob("_tkinter*.pyd"):
+            dst = embed_dlls / pyd.name
+            shutil.copy2(pyd, dst)
+            print(f"  Copied {pyd.name} → {dst}")
+            break
+        else:
+            continue
+        break
+
+    # 3. Copy Tcl/Tk DLLs
+    for search_dir in [dlls_dir, platstdlib, stdlib.parent]:
+        for pattern in ["tcl*.dll", "tk*.dll"]:
+            for dll in search_dir.glob(pattern):
+                dst = embed_dlls / dll.name
+                if not dst.exists():
+                    shutil.copy2(dll, dst)
+                    print(f"  Copied {dll.name} → {dst}")
+
+    # 4. Copy Tcl/Tk library directories (needed for themed widgets etc.)
+    # These are usually in the Python install root under tcl/
+    tcl_root = stdlib.parent / "tcl"
+    if tcl_root.exists():
+        embed_tcl = python_dir / "tcl"
+        if embed_tcl.exists():
+            shutil.rmtree(embed_tcl)
+        shutil.copytree(tcl_root, embed_tcl)
+        print(f"  Copied Tcl/Tk libraries → {embed_tcl}")
+    else:
+        # Try Lib/tcl
+        for candidate in [stdlib / "tcl", stdlib.parent / "Lib" / "tcl"]:
+            if candidate.exists():
+                embed_tcl = python_dir / "tcl"
+                shutil.copytree(candidate, embed_tcl)
+                print(f"  Copied Tcl/Tk libraries → {embed_tcl}")
+                break
+
+    # 5. Patch _pth file to include Lib and DLLs directories
+    for pth in python_dir.glob("python*._pth"):
+        content = pth.read_text()
+        additions = []
+        if "Lib" not in content:
+            additions.append("Lib")
+        if "DLLs" not in content:
+            additions.append("DLLs")
+        if additions:
+            content = content.rstrip("\n") + "\n" + "\n".join(additions) + "\n"
+            pth.write_text(content)
+            print(f"  Patched {pth.name} with: {', '.join(additions)}")
+
+
 def main():
     print("=" * 60)
     print("  Kodex Embedded Python Build")
@@ -113,6 +199,11 @@ def main():
             [str(python_exe), "-m", "pip", "install", dep, "--no-warn-script-location"],
             check=True,
         )
+
+    # 5b. Copy tkinter from system Python into embedded runtime
+    # The embedded Python zip doesn't include tkinter, but Kodex needs it for GUI.
+    print("\n→ Copying tkinter from system Python...")
+    _copy_tkinter(python_dir)
 
     # 6. Copy app source
     app_dir = DIST_DIR / "app"
