@@ -115,6 +115,8 @@ class KodexApp:
         if "%p" in hs.replacement:
             prompt_fn = self._prompt_user
 
+        # trigger is non-None for space/tab/enter (character already typed)
+        # trigger is None for instant matches (no trailing char to erase)
         success = fire_expansion(
             hs.name,
             hs.replacement,
@@ -124,6 +126,7 @@ class KodexApp:
             sound_path=sound_path,
             prompt_fn=prompt_fn,
             stats_fn=self._update_stats,
+            trigger_char=trigger is not None,
         )
 
         if success:

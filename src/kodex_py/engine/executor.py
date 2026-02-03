@@ -33,6 +33,7 @@ def execute(
     sound_path: str | None = None,
     prompt_fn: PromptCallback | None = None,
     stats_fn: Callable[[int], None] | None = None,
+    trigger_char: bool = False,
 ) -> bool:
     """Fire a hotstring expansion.
 
@@ -51,7 +52,10 @@ def execute(
         _play_sound(sound_path)
 
     # ── erase the typed hotstring ───────────────────────────────────
-    sender.send_backspaces(len(hotstring_name))
+    # +1 for the trigger character (space/tab/enter) which was already
+    # typed into the active field before the match callback fires.
+    erase_count = len(hotstring_name) + (1 if trigger_char else 0)
+    sender.send_backspaces(erase_count)
 
     # ── handle script mode (::scr::) ───────────────────────────────
     if is_script:
