@@ -22,48 +22,8 @@ if TYPE_CHECKING:
 
 log = logging.getLogger(__name__)
 
-# We need a tkinter root for the GUI windows.
-# pystray runs its own event loop, so we create a hidden Tk root
-# and run GUI operations on its mainloop thread.
+# tkinter root — runs on the MAIN thread
 _tk_root = None
-_tk_thread = None
-
-
-def _ensure_tk_root():
-    """Create a hidden tkinter root running in a background thread."""
-    global _tk_root, _tk_thread
-
-    if _tk_root is not None:
-        return
-
-    ready = threading.Event()
-
-    def _run():
-        global _tk_root
-        try:
-            import tkinter as tk
-            _tk_root = tk.Tk()
-            _tk_root.withdraw()  # hide the root window
-            ready.set()
-            _tk_root.mainloop()
-        except ImportError:
-            log.warning("tkinter not available — GUI features disabled")
-            ready.set()
-        except Exception:
-            log.warning("Failed to start tkinter", exc_info=True)
-            ready.set()
-
-    _tk_thread = threading.Thread(target=_run, daemon=True, name="tkinter-main")
-    _tk_thread.start()
-    ready.wait(timeout=5)
-
-
-def _run_on_tk(fn):
-    """Schedule a function to run on the tkinter main thread."""
-    if _tk_root is not None:
-        _tk_root.after(0, fn)
-    else:
-        log.warning("No tkinter root — cannot show GUI")
 
 
 def _create_icon():
@@ -73,14 +33,28 @@ def _create_icon():
 
 
 def run_tray(app: "KodexApp") -> None:
-    """Build and run the system-tray icon.  Blocks until the user exits."""
+    """Build and run the system-tray icon with tkinter GUI support.
+
+    Threading model:
+      - Main thread: tkinter mainloop (required for responsive GUI on Windows)
+      - Background thread: pystray icon
+    """
+    import tkinter as tk
     import pystray
 
-    # Ensure tkinter is ready for GUI windows
-    _ensure_tk_root()
+    global _tk_root
+
+    # ── Create hidden tkinter root on main thread ──
+    _tk_root = tk.Tk()
+    _tk_root.withdraw()
 
     # GUI window instances (lazy-created)
     _management_window = [None]
+
+    def _schedule(fn):
+        """Schedule a function to run on the tkinter main thread."""
+        if _tk_root is not None:
+            _tk_root.after(0, fn)
 
     def on_manage(icon, item):
         def _do():
@@ -90,7 +64,7 @@ def run_tray(app: "KodexApp") -> None:
                     app.db, on_reload=app.reload_hotstrings
                 )
             _management_window[0].show()
-        _run_on_tk(_do)
+        _schedule(_do)
 
     def on_new_hotstring(icon, item):
         def _do():
@@ -98,14 +72,14 @@ def run_tray(app: "KodexApp") -> None:
             dialog = NewHotstringDialog(app.db, parent=_tk_root)
             dialog.show()
             app.reload_hotstrings()
-        _run_on_tk(_do)
+        _schedule(_do)
 
     def on_preferences(icon, item):
         def _do():
             from kodex_py.gui.preferences import PreferencesWindow
             prefs = PreferencesWindow(app.db, parent=_tk_root)
             prefs.show()
-        _run_on_tk(_do)
+        _schedule(_do)
 
     def on_tracker(icon, item):
         if hasattr(app, 'tracker') and app.tracker is not None:
@@ -120,9 +94,9 @@ def run_tray(app: "KodexApp") -> None:
         if hasattr(app, 'tracker') and app.tracker is not None and app.tracker.is_tracking:
             app.tracker.stop()
         app.stop()
-        if _tk_root is not None:
-            _tk_root.after(0, _tk_root.destroy)
         icon.stop()
+        # Quit tkinter mainloop from the main thread
+        _schedule(lambda: _tk_root.quit())
 
     def _disable_text(item):
         return "Enable" if app.disabled else "Disable"
@@ -158,4 +132,10 @@ def run_tray(app: "KodexApp") -> None:
     )
 
     icon = pystray.Icon("kodex", icon_image, "Kodex", menu)
-    icon.run()
+
+    # Run pystray in a background thread, tkinter mainloop on main thread
+    tray_thread = threading.Thread(target=icon.run, daemon=True, name="pystray")
+    tray_thread.start()
+
+    # Block on tkinter mainloop (main thread)
+    _tk_root.mainloop()
