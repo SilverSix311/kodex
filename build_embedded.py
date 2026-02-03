@@ -53,6 +53,65 @@ DEPENDENCIES = [
 ]
 
 
+def _copy_missing_extensions(python_dir: Path) -> None:
+    """Copy C extension DLLs that the embedded Python zip doesn't include
+    but that common packages (click, ctypes, sqlite3, etc.) require.
+    """
+    import sysconfig
+
+    platstdlib = Path(sysconfig.get_path("platstdlib"))
+    stdlib = Path(sysconfig.get_path("stdlib"))
+    dlls_dir = platstdlib / "DLLs" if (platstdlib / "DLLs").exists() else stdlib.parent / "DLLs"
+
+    embed_dlls = python_dir / "DLLs"
+    embed_dlls.mkdir(exist_ok=True)
+
+    # Extensions that embedded Python typically lacks
+    needed_extensions = [
+        "_ctypes*.pyd",
+        "_decimal*.pyd",
+        "_socket*.pyd",
+        "_ssl*.pyd",
+        "_sqlite3*.pyd",
+        "_hashlib*.pyd",
+        "_lzma*.pyd",
+        "_bz2*.pyd",
+        "_queue*.pyd",
+        "_overlapped*.pyd",
+        "_asyncio*.pyd",
+        "_multiprocessing*.pyd",
+        "select*.pyd",
+        "unicodedata*.pyd",
+    ]
+
+    # Supporting DLLs that extensions depend on
+    needed_dlls = [
+        "libffi*.dll",
+        "libcrypto*.dll",
+        "libssl*.dll",
+        "sqlite3*.dll",
+    ]
+
+    for search_dir in [dlls_dir, platstdlib, stdlib.parent]:
+        if not search_dir.exists():
+            continue
+        for pattern in needed_extensions + needed_dlls:
+            for src in search_dir.glob(pattern):
+                dst = embed_dlls / src.name
+                if not dst.exists():
+                    shutil.copy2(src, dst)
+                    print(f"  Copied {src.name}")
+
+    # Also check root Python dir for DLLs (some installs put them there)
+    python_install_root = stdlib.parent
+    for pattern in needed_dlls:
+        for src in python_install_root.glob(pattern):
+            dst = embed_dlls / src.name
+            if not dst.exists():
+                shutil.copy2(src, dst)
+                print(f"  Copied {src.name} (from root)")
+
+
 def _copy_tkinter(python_dir: Path) -> None:
     """Copy tkinter and its dependencies from the system Python into the embedded runtime.
 
@@ -200,7 +259,11 @@ def main():
             check=True,
         )
 
-    # 5b. Copy tkinter from system Python into embedded runtime
+    # 5b. Copy essential C extensions missing from embedded Python
+    print("\n→ Copying missing C extensions from system Python...")
+    _copy_missing_extensions(python_dir)
+
+    # 5c. Copy tkinter from system Python into embedded runtime
     # The embedded Python zip doesn't include tkinter, but Kodex needs it for GUI.
     print("\n→ Copying tkinter from system Python...")
     _copy_tkinter(python_dir)
