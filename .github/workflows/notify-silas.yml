@@ -1,0 +1,44 @@
+name: Notify Silas — New Issue
+
+on:
+  issues:
+    types: [opened]
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Send Discord notification
+        env:
+          WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: |
+          ISSUE_TITLE="${{ github.event.issue.title }}"
+          ISSUE_URL="${{ github.event.issue.html_url }}"
+          ISSUE_BODY=$(echo "${{ github.event.issue.body }}" | head -c 500)
+          ISSUE_USER="${{ github.event.issue.user.login }}"
+          
+          # Determine type from labels/title
+          TYPE="📋 Issue"
+          if echo "$ISSUE_TITLE" | grep -qi "\[bug\]"; then
+            TYPE="🐛 Bug Report"
+          elif echo "$ISSUE_TITLE" | grep -qi "\[feature\]"; then
+            TYPE="✨ Feature Request"
+          fi
+          
+          # Build Discord embed
+          PAYLOAD=$(cat <<EOF
+          {
+            "content": "**${TYPE} on Kodex**",
+            "embeds": [{
+              "title": "${ISSUE_TITLE}",
+              "url": "${ISSUE_URL}",
+              "description": "Opened by **${ISSUE_USER}**\n\n${ISSUE_BODY}",
+              "color": 3447003
+            }]
+          }
+          EOF
+          )
+          
+          curl -s -X POST "$WEBHOOK_URL" \
+            -H "Content-Type: application/json" \
+            -d "$PAYLOAD"
