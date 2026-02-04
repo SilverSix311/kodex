@@ -27,6 +27,7 @@ from kodex_py.utils.hex_codec import dehexify, hexify
 log = logging.getLogger(__name__)
 
 _TRIGGER_MARKER = "§Triggers§"
+_TRIGGER_MARKER_ALT = "¢Triggers¢"  # Legacy Texter encoding (0xA2)
 _BUNDLEBREAK = "%bundlebreak"
 
 
@@ -76,8 +77,15 @@ def import_bundle(
     use_file_triggers: bool = True,
 ) -> int:
     """Import a ``.kodex`` bundle file.  Returns the number of hotstrings imported."""
-    content = Path(file_path).read_text(encoding="utf-8")
-    raw_lines = content.split("\n")
+    # Try UTF-8 first, fall back to Windows-1252 for legacy Texter exports
+    path = Path(file_path)
+    try:
+        content = path.read_text(encoding="utf-8")
+    except UnicodeDecodeError:
+        content = path.read_text(encoding="windows-1252")
+    # Normalize legacy trigger marker to standard
+    content = content.replace(_TRIGGER_MARKER_ALT, _TRIGGER_MARKER)
+    raw_lines = [line.rstrip("\r") for line in content.split("\n")]
 
     if not raw_lines:
         raise ValueError("Empty .kodex file")
