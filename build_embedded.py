@@ -251,18 +251,35 @@ def _verify_build(python_exe: Path):
         "tkinter": "GUI windows",
     }
 
+    # Set up env for tkinter verification
+    env = os.environ.copy()
+    tcl_dir = python_exe.parent / "tcl"
+    if (tcl_dir / "tcl8.6").exists():
+        env["TCL_LIBRARY"] = str(tcl_dir / "tcl8.6")
+    if (tcl_dir / "tk8.6").exists():
+        env["TK_LIBRARY"] = str(tcl_dir / "tk8.6")
+
     for mod, desc in checks.items():
+        # For tkinter, also add DLL directory
+        if mod == "tkinter":
+            test_code = (
+                "import os, sys;"
+                f"os.add_dll_directory(r'{python_exe.parent / 'DLLs'}');"
+                f"os.add_dll_directory(r'{python_exe.parent}');"
+                f"import {mod}"
+            )
+        else:
+            test_code = f"import {mod}"
+
         result = subprocess.run(
-            [str(python_exe), "-c", f"import {mod}"],
-            capture_output=True, text=True,
+            [str(python_exe), "-c", test_code],
+            capture_output=True, text=True, env=env,
         )
         if result.returncode == 0:
             print(f"  [OK] {mod} -- {desc}")
         else:
             print(f"  [FAIL] {mod} -- {desc} -- MISSING!")
-            if mod == "tkinter":
-                print("    ->> tkinter DLLs failed to copy from system Python")
-                print("    ->> Re-run Python installer with 'tcl/tk and IDLE' checked")
+            print(f"    Error: {result.stderr.strip().split(chr(10))[-1]}")
             all_ok = False
 
     if not all_ok:
@@ -346,6 +363,39 @@ def main():
     print("\n->> Copying tkinter from system Python...")
     _copy_tkinter(python_dir)
 
+    # 5d. Create sitecustomize.py to add DLL search paths for tkinter
+    # Embedded Python on Windows needs explicit DLL directory registration
+    site_custom = python_dir / "sitecustomize.py"
+    site_custom.write_text(
+        '"""Auto-configure DLL search paths for embedded Python."""\n'
+        'import os, sys\n'
+        'base = os.path.dirname(sys.executable)\n'
+        'dlls = os.path.join(base, "DLLs")\n'
+        'if os.path.isdir(dlls):\n'
+        '    try:\n'
+        '        os.add_dll_directory(dlls)\n'
+        '        os.add_dll_directory(base)\n'
+        '    except (OSError, AttributeError):\n'
+        '        pass\n'
+        'tcl_lib = os.path.join(base, "tcl", "tcl8.6")\n'
+        'tk_lib = os.path.join(base, "tcl", "tk8.6")\n'
+        'if os.path.isdir(tcl_lib):\n'
+        '    os.environ.setdefault("TCL_LIBRARY", tcl_lib)\n'
+        'if os.path.isdir(tk_lib):\n'
+        '    os.environ.setdefault("TK_LIBRARY", tk_lib)\n',
+        encoding="utf-8",
+    )
+    print("  Created sitecustomize.py for DLL paths")
+
+    # Also copy tk/tcl DLLs next to python.exe as fallback
+    dlls_dir = python_dir / "DLLs"
+    for dll_name in ["tcl86t.dll", "tk86t.dll", "_tkinter.pyd"]:
+        src = dlls_dir / dll_name
+        dst = python_dir / dll_name
+        if src.exists() and not dst.exists():
+            shutil.copy2(src, dst)
+            print(f"  Copied {dll_name} to python root (fallback)")
+
     # 6. Copy app source
     app_dir = DIST_DIR / "app"
     src_dir = Path("src/kodex_py")
@@ -371,6 +421,8 @@ setlocal
 set "KODEX_DIR=%~dp0"
 set "PYTHONPATH=%KODEX_DIR%app"
 set "KODEX_DB=%KODEX_DIR%data\\kodex.db"
+set "TCL_LIBRARY=%KODEX_DIR%python\\tcl\\tcl8.6"
+set "TK_LIBRARY=%KODEX_DIR%python\\tcl\\tk8.6"
 
 REM Run Kodex
 "%KODEX_DIR%python\\python.exe" -m kodex_py.cli --db "%KODEX_DB%" %*
@@ -383,6 +435,8 @@ setlocal
 set "KODEX_DIR=%~dp0"
 set "PYTHONPATH=%KODEX_DIR%app"
 set "KODEX_DB=%KODEX_DIR%data\\kodex.db"
+set "TCL_LIBRARY=%KODEX_DIR%python\\tcl\\tcl8.6"
+set "TK_LIBRARY=%KODEX_DIR%python\\tcl\\tk8.6"
 
 REM Run Kodex engine with tray icon
 "%KODEX_DIR%python\\pythonw.exe" -m kodex_py.cli --db "%KODEX_DB%" run
