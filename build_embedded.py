@@ -198,10 +198,88 @@ def _copy_tkinter(python_dir: Path) -> None:
             print(f"  Patched {pth.name} with: {', '.join(additions)}")
 
 
+def _preflight_check():
+    """Verify the build system has everything we need before starting."""
+    print("\n→ Preflight check...")
+    errors = []
+
+    # Check Python version
+    if sys.version_info < (3, 11):
+        errors.append(f"Python 3.11+ required, got {sys.version}")
+
+    # Check tkinter is available on the BUILD system
+    try:
+        import tkinter
+        print(f"  ✓ tkinter available (Tcl/Tk {tkinter.TclVersion})")
+    except ImportError:
+        errors.append(
+            "tkinter not found on build system!\n"
+            "    Install it:\n"
+            "      - Windows: re-run Python installer → check 'tcl/tk and IDLE'\n"
+            "      - Linux: apt install python3-tk\n"
+            "      - macOS: brew install python-tk"
+        )
+
+    # Check Pillow can be imported (needed for tray icon)
+    try:
+        from PIL import Image
+        print("  ✓ Pillow available")
+    except ImportError:
+        print("  ⚠ Pillow not on build system (will install into embedded)")
+
+    if errors:
+        print("\n✗ PREFLIGHT FAILED:")
+        for e in errors:
+            print(f"  ✗ {e}")
+        print("\nFix the above issues and re-run the build.")
+        sys.exit(1)
+
+    print("  ✓ All preflight checks passed\n")
+
+
+def _verify_build(python_exe: Path):
+    """Verify the built runtime has all required modules."""
+    print("\n→ Verifying build...")
+    all_ok = True
+
+    checks = {
+        "pystray": "System tray icon",
+        "PIL": "Image processing (Pillow)",
+        "pynput": "Keyboard input monitoring",
+        "pyperclip": "Clipboard access",
+        "click": "CLI framework",
+        "tkinter": "GUI windows",
+    }
+
+    for mod, desc in checks.items():
+        result = subprocess.run(
+            [str(python_exe), "-c", f"import {mod}"],
+            capture_output=True, text=True,
+        )
+        if result.returncode == 0:
+            print(f"  ✓ {mod} — {desc}")
+        else:
+            print(f"  ✗ {mod} — {desc} — MISSING!")
+            if mod == "tkinter":
+                print("    → tkinter DLLs failed to copy from system Python")
+                print("    → Re-run Python installer with 'tcl/tk and IDLE' checked")
+            all_ok = False
+
+    if not all_ok:
+        print("\n⚠ BUILD HAS MISSING DEPENDENCIES — some features may not work!")
+        print("  Fix the issues above and rebuild.\n")
+    else:
+        print("  ✓ All dependencies verified!\n")
+
+    return all_ok
+
+
 def main():
     print("=" * 60)
     print("  Kodex Embedded Python Build")
     print("=" * 60)
+
+    _preflight_check()
 
     # Clean
     if DIST_DIR.exists():
@@ -326,7 +404,10 @@ cli()
 '''
     (app_dir / "kodex_py" / "__main__.py").write_text(main_py, encoding="utf-8")
 
-    # 10. Summary
+    # 10. Verify everything works
+    _verify_build(python_exe)
+
+    # 11. Summary
     total_size = sum(f.stat().st_size for f in DIST_DIR.rglob("*") if f.is_file())
     print("\n" + "=" * 60)
     print("  Build complete!")
