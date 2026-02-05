@@ -1,20 +1,20 @@
-"""Build script — packages Kodex with embedded Python for Windows.
+"""Build script -- packages Kodex with embedded Python for Windows.
 
 This script downloads an embedded Python runtime and creates a portable
 distribution structure:
 
     kodex/
-    ├── python/           ← Embedded Python runtime
-    │   ├── python.exe
-    │   ├── python311.dll
-    │   ├── Lib/
-    │   └── ...
-    ├── app/              ← Kodex source code
-    │   └── kodex_py/
-    ├── data/             ← User data (created on first run)
-    │   └── kodex.db
-    ├── kodex.bat         ← Launcher script
-    └── kodex-gui.vbs     ← No-console launcher
+    +---- python/           <- Embedded Python runtime
+    |   +---- python.exe
+    |   +---- python311.dll
+    |   +---- Lib/
+    |   +---- ...
+    +---- app/              <- Kodex source code
+    |   +---- kodex_py/
+    +---- data/             <- User data (created on first run)
+    |   +---- kodex.db
+    +---- kodex.bat         <- Launcher script
+    +---- kodex-gui.vbs     <- No-console launcher
 
 Run on a Windows machine:
     python build_embedded.py
@@ -34,7 +34,7 @@ import urllib.request
 import zipfile
 from pathlib import Path
 
-# ── Configuration ───────────────────────────────────────────────────
+# -- Configuration ---------------------------------------------------
 
 PYTHON_VERSION = "3.11.9"
 PYTHON_EMBED_URL = f"https://www.python.org/ftp/python/{PYTHON_VERSION}/python-{PYTHON_VERSION}-embed-amd64.zip"
@@ -133,7 +133,7 @@ def _copy_tkinter(python_dir: Path) -> None:
     # 1. Copy tkinter package
     tkinter_src = stdlib / "tkinter"
     if not tkinter_src.exists():
-        print("  WARNING: tkinter not found in system Python — GUI will not work!")
+        print("  WARNING: tkinter not found in system Python -- GUI will not work!")
         return
 
     tkinter_dst = python_dir / "Lib" / "tkinter"
@@ -210,7 +210,7 @@ def _preflight_check():
     # Check tkinter is available on the BUILD system
     try:
         import tkinter
-        print(f"  ✓ tkinter available (Tcl/Tk {tkinter.TclVersion})")
+        print(f"  [OK] tkinter available (Tcl/Tk {tkinter.TclVersion})")
     except ImportError:
         errors.append(
             "tkinter not found on build system!\n"
@@ -223,18 +223,18 @@ def _preflight_check():
     # Check Pillow can be imported (needed for tray icon)
     try:
         from PIL import Image
-        print("  ✓ Pillow available")
+        print("  [OK] Pillow available")
     except ImportError:
-        print("  ⚠ Pillow not on build system (will install into embedded)")
+        print("  [WARN] Pillow not on build system (will install into embedded)")
 
     if errors:
-        print("\n✗ PREFLIGHT FAILED:")
+        print("\n[FAIL] PREFLIGHT FAILED:")
         for e in errors:
-            print(f"  ✗ {e}")
+            print(f"  [FAIL] {e}")
         print("\nFix the above issues and re-run the build.")
         sys.exit(1)
 
-    print("  ✓ All preflight checks passed\n")
+    print("  [OK] All preflight checks passed\n")
 
 
 def _verify_build(python_exe: Path):
@@ -257,19 +257,19 @@ def _verify_build(python_exe: Path):
             capture_output=True, text=True,
         )
         if result.returncode == 0:
-            print(f"  ✓ {mod} — {desc}")
+            print(f"  [OK] {mod} -- {desc}")
         else:
-            print(f"  ✗ {mod} — {desc} — MISSING!")
+            print(f"  [FAIL] {mod} -- {desc} -- MISSING!")
             if mod == "tkinter":
                 print("    ->> tkinter DLLs failed to copy from system Python")
                 print("    ->> Re-run Python installer with 'tcl/tk and IDLE' checked")
             all_ok = False
 
     if not all_ok:
-        print("\n⚠ BUILD HAS MISSING DEPENDENCIES — some features may not work!")
+        print("\n[WARN] BUILD HAS MISSING DEPENDENCIES -- some features may not work!")
         print("  Fix the issues above and rebuild.\n")
     else:
-        print("  ✓ All dependencies verified!\n")
+        print("  [OK] All dependencies verified!\n")
 
     return all_ok
 
@@ -365,7 +365,7 @@ def main():
     # 8. Create launcher scripts
     print("\n->> Creating launcher scripts...")
 
-    # kodex.bat — console launcher
+    # kodex.bat -- console launcher
     bat_content = '''@echo off
 setlocal
 set "KODEX_DIR=%~dp0"
@@ -377,7 +377,7 @@ REM Run Kodex
 '''
     (DIST_DIR / "kodex.bat").write_text(bat_content, encoding="utf-8")
 
-    # kodex-run.bat — run the engine (GUI mode)
+    # kodex-run.bat -- run the engine (GUI mode)
     run_bat = '''@echo off
 setlocal
 set "KODEX_DIR=%~dp0"
@@ -389,7 +389,7 @@ REM Run Kodex engine with tray icon
 '''
     (DIST_DIR / "kodex-run.bat").write_text(run_bat, encoding="utf-8")
 
-    # kodex-gui.vbs — no-console launcher (hides the terminal window)
+    # kodex-gui.vbs -- no-console launcher (hides the terminal window)
     vbs_content = '''Set WshShell = CreateObject("WScript.Shell")
 kodexDir = Replace(WScript.ScriptFullName, WScript.ScriptName, "")
 WshShell.Run Chr(34) & kodexDir & "python\\pythonw.exe" & Chr(34) & _
