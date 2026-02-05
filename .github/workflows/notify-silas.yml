@@ -1,44 +1,74 @@
-name: Notify Silas — New Issue
+name: Notify — New Issue
 
 on:
   issues:
-    types: [opened]
+    types: [opened, reopened]
+  pull_request:
+    types: [opened, reopened]
 
 jobs:
   notify:
     runs-on: ubuntu-latest
     steps:
-      - name: Send Discord notification
+      - name: Discord notification
         env:
           WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
         run: |
-          ISSUE_TITLE="${{ github.event.issue.title }}"
-          ISSUE_URL="${{ github.event.issue.html_url }}"
-          ISSUE_BODY=$(echo "${{ github.event.issue.body }}" | head -c 500)
-          ISSUE_USER="${{ github.event.issue.user.login }}"
+          if [ -z "$WEBHOOK_URL" ]; then exit 0; fi
           
-          # Determine type from labels/title
-          TYPE="📋 Issue"
-          if echo "$ISSUE_TITLE" | grep -qi "\[bug\]"; then
-            TYPE="🐛 Bug Report"
-          elif echo "$ISSUE_TITLE" | grep -qi "\[feature\]"; then
-            TYPE="✨ Feature Request"
-          fi
+          EVENT="${{ github.event_name }}"
           
-          # Build Discord embed
-          PAYLOAD=$(cat <<EOF
+          if [ "$EVENT" = "issues" ]; then
+            TITLE=$(echo "${{ github.event.issue.title }}" | sed 's/"/\\"/g')
+            URL="${{ github.event.issue.html_url }}"
+            USER="${{ github.event.issue.user.login }}"
+            BODY=$(echo "${{ github.event.issue.body }}" | head -c 400 | sed 's/"/\\"/g' | tr '\n' ' ')
+            ACTION="${{ github.event.action }}"
+            
+            TYPE="📋 Issue"
+            COLOR=3447003
+            if echo "$TITLE" | grep -qi "\[bug\]"; then
+              TYPE="🐛 Bug Report"
+              COLOR=15158332
+            elif echo "$TITLE" | grep -qi "\[feature\]"; then
+              TYPE="✨ Feature Request"
+              COLOR=3066993
+            fi
+            
+            PAYLOAD=$(cat <<EOF
           {
-            "content": "**${TYPE} on Kodex**",
             "embeds": [{
-              "title": "${ISSUE_TITLE}",
-              "url": "${ISSUE_URL}",
-              "description": "Opened by **${ISSUE_USER}**\n\n${ISSUE_BODY}",
-              "color": 3447003
+              "title": "${TYPE}: ${TITLE}",
+              "url": "${URL}",
+              "description": "${ACTION} by **${USER}**\n\n${BODY}",
+              "color": ${COLOR},
+              "footer": {"text": "Kodex"},
+              "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
             }]
           }
           EOF
-          )
+            )
+          elif [ "$EVENT" = "pull_request" ]; then
+            TITLE=$(echo "${{ github.event.pull_request.title }}" | sed 's/"/\\"/g')
+            URL="${{ github.event.pull_request.html_url }}"
+            USER="${{ github.event.pull_request.user.login }}"
+            ACTION="${{ github.event.action }}"
+            
+            PAYLOAD=$(cat <<EOF
+          {
+            "embeds": [{
+              "title": "🔀 PR: ${TITLE}",
+              "url": "${URL}",
+              "description": "${ACTION} by **${USER}**",
+              "color": 7506394,
+              "footer": {"text": "Kodex"},
+              "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            }]
+          }
+          EOF
+            )
+          fi
           
-          curl -s -X POST "$WEBHOOK_URL" \
+          curl -sf -X POST "$WEBHOOK_URL" \
             -H "Content-Type: application/json" \
             -d "$PAYLOAD"

@@ -47,3 +47,57 @@ jobs:
       
       - name: Check formatting
         run: ruff check src/ tests/
+
+  notify:
+    runs-on: ubuntu-latest
+    needs: [test, lint]
+    if: always()
+    steps:
+      - name: Discord notification
+        env:
+          WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: |
+          if [ -z "$WEBHOOK_URL" ]; then exit 0; fi
+          
+          COMMIT_MSG=$(echo "${{ github.event.head_commit.message }}" | head -1 | sed 's/"/\\"/g')
+          COMMIT_URL="${{ github.event.head_commit.url }}"
+          AUTHOR="${{ github.event.head_commit.author.username }}"
+          SHA=$(echo "${{ github.sha }}" | cut -c1-7)
+          
+          # Check job results
+          TEST="${{ needs.test.result }}"
+          LINT="${{ needs.lint.result }}"
+          
+          if [ "$TEST" = "success" ] && [ "$LINT" = "success" ]; then
+            COLOR=3066993
+            STATUS="✅ All checks passed"
+            EMOJI="🟢"
+          elif [ "$TEST" = "cancelled" ] || [ "$LINT" = "cancelled" ]; then
+            COLOR=10070709
+            STATUS="⚪ Cancelled"
+            EMOJI="⚪"
+          else
+            COLOR=15158332
+            STATUS="❌ Checks failed"
+            EMOJI="🔴"
+            [ "$TEST" != "success" ] && STATUS="$STATUS — Tests: $TEST"
+            [ "$LINT" != "success" ] && STATUS="$STATUS — Lint: $LINT"
+          fi
+          
+          PAYLOAD=$(cat <<EOF
+          {
+            "embeds": [{
+              "title": "${EMOJI} CI — ${SHA}",
+              "url": "${{ github.event.head_commit.url }}",
+              "description": "**${COMMIT_MSG}**\nby ${AUTHOR}\n\n${STATUS}",
+              "color": ${COLOR},
+              "footer": {"text": "Kodex CI · ${{ github.ref_name }}"},
+              "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            }]
+          }
+          EOF
+          )
+          
+          curl -sf -X POST "$WEBHOOK_URL" \
+            -H "Content-Type: application/json" \
+            -d "$PAYLOAD"
