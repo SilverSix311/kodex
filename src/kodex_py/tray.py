@@ -39,14 +39,20 @@ def run_tray(app: "KodexApp") -> None:
       - Main thread: tkinter mainloop (required for responsive GUI on Windows)
       - Background thread: pystray icon
     """
-    import tkinter as tk
     import pystray
 
     global _tk_root
 
-    # ── Create hidden tkinter root on main thread ──
-    _tk_root = tk.Tk()
-    _tk_root.withdraw()
+    # ── Try to create hidden tkinter root on main thread ──
+    # Embedded Python may not have tkinter DLLs — tray works without it,
+    # GUI popup windows (manage, preferences) won't.
+    try:
+        import tkinter as tk
+        _tk_root = tk.Tk()
+        _tk_root.withdraw()
+    except ImportError:
+        log.warning("tkinter not available — tray will work but GUI popups disabled")
+        _tk_root = None
 
     # GUI window instances (lazy-created)
     _management_window = [None]
@@ -96,7 +102,8 @@ def run_tray(app: "KodexApp") -> None:
         app.stop()
         icon.stop()
         # Quit tkinter mainloop from the main thread
-        _schedule(lambda: _tk_root.quit())
+        if _tk_root is not None:
+            _schedule(lambda: _tk_root.quit())
 
     def _disable_text(item):
         return "Enable" if app.disabled else "Disable"
@@ -137,5 +144,8 @@ def run_tray(app: "KodexApp") -> None:
     tray_thread = threading.Thread(target=icon.run, daemon=True, name="pystray")
     tray_thread.start()
 
-    # Block on tkinter mainloop (main thread)
-    _tk_root.mainloop()
+    # Block on tkinter mainloop (main thread) or pystray thread if no tkinter
+    if _tk_root is not None:
+        _tk_root.mainloop()
+    else:
+        tray_thread.join()

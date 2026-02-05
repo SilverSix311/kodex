@@ -39,6 +39,21 @@ class KodexApp:
 
     def start(self) -> None:
         """Initialise and run the application (blocks on tray icon loop)."""
+        import signal
+
+        def _shutdown(sig, frame):
+            log.info("Received signal %s — shutting down", sig)
+            self.stop()
+            sys.exit(0)
+
+        signal.signal(signal.SIGINT, _shutdown)
+        signal.signal(signal.SIGTERM, _shutdown)
+        if sys.platform == "win32":
+            try:
+                signal.signal(signal.SIGBREAK, _shutdown)
+            except (AttributeError, OSError):
+                pass
+
         log.info("Kodex %s starting — db=%s", __version__, self.db_path)
 
         # Database
@@ -69,8 +84,11 @@ class KodexApp:
         try:
             from kodex_py.tray import run_tray
             run_tray(self)
-        except ImportError:
-            log.warning("pystray not available — running headless")
+        except ImportError as e:
+            log.warning("Tray unavailable (%s) — running headless", e)
+            self._input_monitor._kb_listener.join()
+        except Exception as e:
+            log.error("Tray failed: %s — running headless", e)
             self._input_monitor._kb_listener.join()
 
     def stop(self) -> None:
