@@ -116,10 +116,10 @@ def _copy_tkinter(python_dir: Path) -> None:
     """Copy tkinter and its dependencies from the system Python into the embedded runtime.
 
     The embedded Python distribution doesn't include tkinter. We need:
-      1. The `tkinter` package (Python source) → Lib/tkinter/
-      2. The `_tkinter` C extension (.pyd) → _tkinter.pyd
-      3. The Tcl/Tk DLLs (tcl86t.dll, tk86t.dll) → DLLs/ or root
-      4. The Tcl/Tk library files (scripts, themes) → tcl/ or Lib/
+      1. The `tkinter` package (Python source) ->> Lib/tkinter/
+      2. The `_tkinter` C extension (.pyd) ->> _tkinter.pyd
+      3. The Tcl/Tk DLLs (tcl86t.dll, tk86t.dll) ->> DLLs/ or root
+      4. The Tcl/Tk library files (scripts, themes) ->> tcl/ or Lib/
     """
     import sysconfig
     import glob
@@ -141,7 +141,7 @@ def _copy_tkinter(python_dir: Path) -> None:
     if tkinter_dst.exists():
         shutil.rmtree(tkinter_dst)
     shutil.copytree(tkinter_src, tkinter_dst)
-    print(f"  Copied tkinter package → {tkinter_dst}")
+    print(f"  Copied tkinter package ->> {tkinter_dst}")
 
     # 2. Copy _tkinter.pyd (C extension)
     embed_dlls = python_dir / "DLLs"
@@ -151,7 +151,7 @@ def _copy_tkinter(python_dir: Path) -> None:
         for pyd in search_dir.glob("_tkinter*.pyd"):
             dst = embed_dlls / pyd.name
             shutil.copy2(pyd, dst)
-            print(f"  Copied {pyd.name} → {dst}")
+            print(f"  Copied {pyd.name} ->> {dst}")
             break
         else:
             continue
@@ -164,7 +164,7 @@ def _copy_tkinter(python_dir: Path) -> None:
                 dst = embed_dlls / dll.name
                 if not dst.exists():
                     shutil.copy2(dll, dst)
-                    print(f"  Copied {dll.name} → {dst}")
+                    print(f"  Copied {dll.name} ->> {dst}")
 
     # 4. Copy Tcl/Tk library directories (needed for themed widgets etc.)
     # These are usually in the Python install root under tcl/
@@ -174,14 +174,14 @@ def _copy_tkinter(python_dir: Path) -> None:
         if embed_tcl.exists():
             shutil.rmtree(embed_tcl)
         shutil.copytree(tcl_root, embed_tcl)
-        print(f"  Copied Tcl/Tk libraries → {embed_tcl}")
+        print(f"  Copied Tcl/Tk libraries ->> {embed_tcl}")
     else:
         # Try Lib/tcl
         for candidate in [stdlib / "tcl", stdlib.parent / "Lib" / "tcl"]:
             if candidate.exists():
                 embed_tcl = python_dir / "tcl"
                 shutil.copytree(candidate, embed_tcl)
-                print(f"  Copied Tcl/Tk libraries → {embed_tcl}")
+                print(f"  Copied Tcl/Tk libraries ->> {embed_tcl}")
                 break
 
     # 5. Patch _pth file to include Lib and DLLs directories
@@ -200,7 +200,7 @@ def _copy_tkinter(python_dir: Path) -> None:
 
 def _preflight_check():
     """Verify the build system has everything we need before starting."""
-    print("\n→ Preflight check...")
+    print("\n->> Preflight check...")
     errors = []
 
     # Check Python version
@@ -215,7 +215,7 @@ def _preflight_check():
         errors.append(
             "tkinter not found on build system!\n"
             "    Install it:\n"
-            "      - Windows: re-run Python installer → check 'tcl/tk and IDLE'\n"
+            "      - Windows: re-run Python installer ->> check 'tcl/tk and IDLE'\n"
             "      - Linux: apt install python3-tk\n"
             "      - macOS: brew install python-tk"
         )
@@ -239,7 +239,7 @@ def _preflight_check():
 
 def _verify_build(python_exe: Path):
     """Verify the built runtime has all required modules."""
-    print("\n→ Verifying build...")
+    print("\n->> Verifying build...")
     all_ok = True
 
     checks = {
@@ -261,8 +261,8 @@ def _verify_build(python_exe: Path):
         else:
             print(f"  ✗ {mod} — {desc} — MISSING!")
             if mod == "tkinter":
-                print("    → tkinter DLLs failed to copy from system Python")
-                print("    → Re-run Python installer with 'tcl/tk and IDLE' checked")
+                print("    ->> tkinter DLLs failed to copy from system Python")
+                print("    ->> Re-run Python installer with 'tcl/tk and IDLE' checked")
             all_ok = False
 
     if not all_ok:
@@ -283,7 +283,7 @@ def main():
 
     # Clean
     if DIST_DIR.exists():
-        print(f"\n→ Cleaning {DIST_DIR}...")
+        print(f"\n->> Cleaning {DIST_DIR}...")
         shutil.rmtree(DIST_DIR)
     DIST_DIR.mkdir(parents=True)
 
@@ -292,14 +292,14 @@ def main():
     # 1. Download embedded Python
     embed_zip = BUILD_DIR / f"python-{PYTHON_VERSION}-embed-amd64.zip"
     if not embed_zip.exists():
-        print(f"\n→ Downloading Python {PYTHON_VERSION} embedded...")
+        print(f"\n->> Downloading Python {PYTHON_VERSION} embedded...")
         urllib.request.urlretrieve(PYTHON_EMBED_URL, embed_zip)
     else:
-        print(f"\n→ Using cached Python embed: {embed_zip}")
+        print(f"\n->> Using cached Python embed: {embed_zip}")
 
     # 2. Extract embedded Python
     python_dir = DIST_DIR / "python"
-    print(f"\n→ Extracting to {python_dir}...")
+    print(f"\n->> Extracting to {python_dir}...")
     with zipfile.ZipFile(embed_zip, "r") as zf:
         zf.extractall(python_dir)
 
@@ -318,18 +318,18 @@ def main():
     # 4. Install pip
     get_pip = BUILD_DIR / "get-pip.py"
     if not get_pip.exists():
-        print("\n→ Downloading get-pip.py...")
+        print("\n->> Downloading get-pip.py...")
         urllib.request.urlretrieve(PIP_URL, get_pip)
 
     python_exe = python_dir / "python.exe"
-    print("\n→ Installing pip...")
+    print("\n->> Installing pip...")
     subprocess.run(
         [str(python_exe), str(get_pip), "--no-warn-script-location"],
         check=True,
     )
 
     # 5. Install dependencies
-    print("\n→ Installing dependencies...")
+    print("\n->> Installing dependencies...")
     for dep in DEPENDENCIES:
         print(f"  Installing {dep}...")
         subprocess.run(
@@ -338,18 +338,18 @@ def main():
         )
 
     # 5b. Copy essential C extensions missing from embedded Python
-    print("\n→ Copying missing C extensions from system Python...")
+    print("\n->> Copying missing C extensions from system Python...")
     _copy_missing_extensions(python_dir)
 
     # 5c. Copy tkinter from system Python into embedded runtime
     # The embedded Python zip doesn't include tkinter, but Kodex needs it for GUI.
-    print("\n→ Copying tkinter from system Python...")
+    print("\n->> Copying tkinter from system Python...")
     _copy_tkinter(python_dir)
 
     # 6. Copy app source
     app_dir = DIST_DIR / "app"
     src_dir = Path("src/kodex_py")
-    print(f"\n→ Copying source to {app_dir}...")
+    print(f"\n->> Copying source to {app_dir}...")
     shutil.copytree(src_dir, app_dir / "kodex_py")
 
     # Also copy resources if they exist
@@ -363,7 +363,7 @@ def main():
     (data_dir / "timeTracker").mkdir(exist_ok=True)
 
     # 8. Create launcher scripts
-    print("\n→ Creating launcher scripts...")
+    print("\n->> Creating launcher scripts...")
 
     # kodex.bat — console launcher
     bat_content = '''@echo off
