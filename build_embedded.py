@@ -36,7 +36,7 @@ from pathlib import Path
 
 # -- Configuration ---------------------------------------------------
 
-PYTHON_VERSION = "3.13.12"
+PYTHON_VERSION = "3.11.9"  # Targeting 3.11 for stability and cross-machine compatibility
 PYTHON_EMBED_URL = f"https://www.python.org/ftp/python/{PYTHON_VERSION}/python-{PYTHON_VERSION}-embed-amd64.zip"
 PIP_URL = "https://bootstrap.pypa.io/get-pip.py"
 

@@ -34,12 +34,24 @@ kodex/
 └── kodex-gui.vbs         ← Engine launcher (no console window)
 ```
 
+## Target Python Version
+
+**Python 3.11** is the target version for Kodex embedded builds.
+
+Why 3.11 specifically:
+- **Stability** — Well-established release with broad library support
+- **Embedded availability** — Clean embeddable packages available for Windows
+- **tkinter compatibility** — Fewer DLL issues with embedded tkinter
+- **Cross-machine consistency** — Builds reliably on different Windows machines
+
+> **Note:** Python 3.12+ and 3.13+ have shown build inconsistencies across machines. Stick with 3.11 unless you have a specific reason to upgrade.
+
 ## Building
 
 ### Prerequisites
 
 - **Windows 10** or later
-- **Python 3.11+** installed on the build machine (used to run the build script)
+- **Python 3.11** installed on the build machine (used to run the build script)
 - **Internet connection** (to download embedded Python and pip packages)
 
 ### Quick Build
