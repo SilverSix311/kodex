@@ -9,9 +9,11 @@ Three tabs:
 from __future__ import annotations
 
 import logging
+import tkinter as tk
+from tkinter import filedialog, messagebox
 from typing import TYPE_CHECKING
 
-import dearpygui.dearpygui as dpg
+import customtkinter as ctk
 
 if TYPE_CHECKING:
     from kodex_py.storage.database import Database
@@ -25,8 +27,6 @@ class PreferencesWindow:
     def __init__(self, db: "Database", parent=None) -> None:
         self.db = db
         self._parent = parent
-        self._dialog_tag = "preferences_dialog"
-        self._closed = False
 
     def show(self) -> None:
         from kodex_py.config import load_config, save_config
@@ -34,223 +34,168 @@ class PreferencesWindow:
 
         cfg = load_config(self.db)
 
-        # Generate unique tags
-        dialog_id = id(self)
-        hk_create_tag = f"pref_hk_create_{dialog_id}"
-        hk_manage_tag = f"pref_hk_manage_{dialog_id}"
-        hk_disable_tag = f"pref_hk_disable_{dialog_id}"
-        hk_tracker_tag = f"pref_hk_tracker_{dialog_id}"
-        mode_tag = f"pref_mode_{dialog_id}"
-        sound_tag = f"pref_sound_{dialog_id}"
-        startup_tag = f"pref_startup_{dialog_id}"
-        autocorrect_tag = f"pref_autocorrect_{dialog_id}"
+        win = ctk.CTkToplevel(self._parent)
+        win.title("Kodex — Preferences")
+        win.geometry("520x480")
+        win.resizable(False, False)
+        win.grab_set()
+        win.lift()
+        win.focus_force()
 
-        def _on_save():
-            cfg.hotkey_create = dpg.get_value(hk_create_tag)
-            cfg.hotkey_manage = dpg.get_value(hk_manage_tag)
-            cfg.hotkey_disable = dpg.get_value(hk_disable_tag)
-            cfg.hotkey_tracker = dpg.get_value(hk_tracker_tag)
+        # ── Variables ──
+        hk_create_var = tk.StringVar(value=cfg.hotkey_create)
+        hk_manage_var = tk.StringVar(value=cfg.hotkey_manage)
+        hk_disable_var = tk.StringVar(value=cfg.hotkey_disable)
+        hk_tracker_var = tk.StringVar(value=cfg.hotkey_tracker)
 
-            mode_val = dpg.get_value(mode_tag)
-            cfg.send_mode = SendMode.CLIPBOARD if mode_val == "Clipboard" else SendMode.DIRECT
+        current_mode = "Clipboard" if cfg.send_mode == SendMode.CLIPBOARD else "Direct"
+        mode_var = tk.StringVar(value=current_mode)
 
-            cfg.play_sound = dpg.get_value(sound_tag)
-            cfg.run_at_startup = dpg.get_value(startup_tag)
-            cfg.autocorrect_enabled = dpg.get_value(autocorrect_tag)
+        sound_var = tk.BooleanVar(value=cfg.play_sound)
+        startup_var = tk.BooleanVar(value=cfg.run_at_startup)
+        autocorrect_var = tk.BooleanVar(value=cfg.autocorrect_enabled)
 
-            save_config(self.db, cfg)
-            self._close_dialog()
-
-        def _on_cancel():
-            self._close_dialog()
-
-        def _do_cheatsheet():
-            from kodex_py.gui.cheatsheet import generate_cheatsheet
-
-            # Use file dialog
-            def _save_callback(sender, app_data):
-                if app_data and "file_path_name" in app_data:
-                    path = app_data["file_path_name"]
-                    if path:
-                        generate_cheatsheet(self.db, path)
-                        self._show_info(f"Cheatsheet saved to {path}")
-
-            dpg.add_file_dialog(
-                label="Save Cheatsheet",
-                callback=_save_callback,
-                directory_selector=False,
-                default_filename="kodex-cheatsheet.html",
-                modal=True,
-                width=500,
-                height=400,
-            )
-
-        # Stats data
-        expanded = self.db.get_stat("expanded")
-        chars = self.db.get_stat("chars_saved")
+        # ── Stats data ──
+        expanded = self.db.get_stat("expanded") or 0
+        chars = self.db.get_stat("chars_saved") or 0
         hours = chars / 24_000 if chars else 0
         total_hs = len(self.db.get_hotstrings())
         total_bundles = len(self.db.get_bundles())
 
-        # Build dialog
-        with dpg.window(
-            label="Kodex — Preferences",
-            tag=self._dialog_tag,
-            modal=True,
-            no_close=True,
-            width=500,
-            height=440,
-            pos=[200, 100],
-        ):
-            with dpg.tab_bar():
-                # ── General Tab ──
-                with dpg.tab(label="General"):
-                    dpg.add_spacer(height=8)
+        # ── Tabs ──
+        outer = ctk.CTkFrame(win, fg_color="transparent")
+        outer.pack(fill="both", expand=True, padx=16, pady=(16, 8))
 
-                    # Hotkeys section
-                    with dpg.collapsing_header(label="Hotkeys", default_open=True):
-                        with dpg.group():
-                            with dpg.group(horizontal=True):
-                                dpg.add_text("Create hotstring:", bullet=False)
-                                dpg.add_spacer(width=20)
-                                dpg.add_input_text(
-                                    tag=hk_create_tag,
-                                    default_value=cfg.hotkey_create,
-                                    width=150,
-                                )
+        tabview = ctk.CTkTabview(outer)
+        tabview.pack(fill="both", expand=True, pady=(0, 12))
 
-                            with dpg.group(horizontal=True):
-                                dpg.add_text("Manage hotstrings:")
-                                dpg.add_spacer(width=8)
-                                dpg.add_input_text(
-                                    tag=hk_manage_tag,
-                                    default_value=cfg.hotkey_manage,
-                                    width=150,
-                                )
+        # ── General Tab ──
+        gen = tabview.add("General")
 
-                            with dpg.group(horizontal=True):
-                                dpg.add_text("Disable toggle:")
-                                dpg.add_spacer(width=30)
-                                dpg.add_input_text(
-                                    tag=hk_disable_tag,
-                                    default_value=cfg.hotkey_disable,
-                                    width=150,
-                                )
+        # Hotkeys section
+        hk_frame = ctk.CTkFrame(gen, corner_radius=6)
+        hk_frame.pack(fill="x", pady=(8, 8), padx=4)
+        ctk.CTkLabel(
+            hk_frame, text="Hotkeys", font=ctk.CTkFont(weight="bold"), anchor="w"
+        ).pack(anchor="w", padx=12, pady=(8, 4))
 
-                            with dpg.group(horizontal=True):
-                                dpg.add_text("Ticket tracker:")
-                                dpg.add_spacer(width=30)
-                                dpg.add_input_text(
-                                    tag=hk_tracker_tag,
-                                    default_value=cfg.hotkey_tracker,
-                                    width=150,
-                                )
+        def _hotkey_row(parent, label: str, var: tk.StringVar) -> None:
+            row = ctk.CTkFrame(parent, fg_color="transparent")
+            row.pack(fill="x", padx=12, pady=2)
+            lbl = ctk.CTkLabel(row, text=label, width=160, anchor="w")
+            lbl.pack(side="left")
+            ctk.CTkEntry(row, textvariable=var, width=180).pack(side="left")
 
-                    dpg.add_spacer(height=8)
+        _hotkey_row(hk_frame, "Create hotstring:", hk_create_var)
+        _hotkey_row(hk_frame, "Manage hotstrings:", hk_manage_var)
+        _hotkey_row(hk_frame, "Disable toggle:", hk_disable_var)
+        _hotkey_row(hk_frame, "Ticket tracker:", hk_tracker_var)
+        ctk.CTkFrame(hk_frame, fg_color="transparent", height=8).pack()
 
-                    # Send Mode section
-                    with dpg.collapsing_header(label="Send Mode", default_open=True):
-                        current_mode = "Clipboard" if cfg.send_mode == SendMode.CLIPBOARD else "Direct"
-                        dpg.add_combo(
-                            tag=mode_tag,
-                            items=["Direct", "Clipboard"],
-                            default_value=current_mode,
-                            width=200,
-                        )
-                        dpg.add_text(
-                            "Direct = keystroke injection\nClipboard = Ctrl+V paste",
-                            color=(150, 150, 150),
-                        )
+        # Send mode section
+        mode_frame = ctk.CTkFrame(gen, corner_radius=6)
+        mode_frame.pack(fill="x", pady=(0, 8), padx=4)
+        ctk.CTkLabel(
+            mode_frame, text="Send Mode", font=ctk.CTkFont(weight="bold"), anchor="w"
+        ).pack(anchor="w", padx=12, pady=(8, 4))
+        mode_row = ctk.CTkFrame(mode_frame, fg_color="transparent")
+        mode_row.pack(fill="x", padx=12, pady=(0, 4))
+        ctk.CTkComboBox(
+            mode_row, values=["Direct", "Clipboard"], variable=mode_var, width=200
+        ).pack(side="left")
+        ctk.CTkLabel(
+            mode_frame,
+            text="Direct = keystroke injection  |  Clipboard = Ctrl+V paste",
+            text_color="gray60",
+            anchor="w",
+        ).pack(anchor="w", padx=12, pady=(0, 8))
 
-                    dpg.add_spacer(height=8)
+        # Checkboxes
+        checks_frame = ctk.CTkFrame(gen, fg_color="transparent")
+        checks_frame.pack(fill="x", padx=4)
+        ctk.CTkCheckBox(
+            checks_frame, text="Play sound on expansion", variable=sound_var
+        ).pack(anchor="w", pady=3)
+        ctk.CTkCheckBox(
+            checks_frame, text="Run at Windows startup", variable=startup_var
+        ).pack(anchor="w", pady=3)
+        ctk.CTkCheckBox(
+            checks_frame, text="Enable autocorrect", variable=autocorrect_var
+        ).pack(anchor="w", pady=3)
 
-                    # Checkboxes
-                    dpg.add_checkbox(
-                        label="Play sound on expansion",
-                        tag=sound_tag,
-                        default_value=cfg.play_sound,
-                    )
-                    dpg.add_checkbox(
-                        label="Run at Windows startup",
-                        tag=startup_tag,
-                        default_value=cfg.run_at_startup,
-                    )
-                    dpg.add_checkbox(
-                        label="Enable autocorrect",
-                        tag=autocorrect_tag,
-                        default_value=cfg.autocorrect_enabled,
-                    )
+        # ── Print Tab ──
+        prn = tabview.add("Print")
+        prn_inner = ctk.CTkFrame(prn, fg_color="transparent")
+        prn_inner.pack(fill="both", expand=True, padx=8, pady=20)
+        ctk.CTkLabel(
+            prn_inner, text="Generate a printable HTML cheatsheet\nof all your hotstrings.", anchor="w"
+        ).pack(anchor="w", pady=(0, 20))
 
-                # ── Print Tab ──
-                with dpg.tab(label="Print"):
-                    dpg.add_spacer(height=20)
-                    dpg.add_text("Generate a printable HTML cheatsheet")
-                    dpg.add_text("of all your hotstrings.")
-                    dpg.add_spacer(height=20)
-                    dpg.add_button(label="Generate Cheatsheet", callback=_do_cheatsheet)
+        def _do_cheatsheet():
+            from kodex_py.gui.cheatsheet import generate_cheatsheet
 
-                # ── Stats Tab ──
-                with dpg.tab(label="Stats"):
-                    dpg.add_spacer(height=12)
+            path = filedialog.asksaveasfilename(
+                parent=win,
+                title="Save Cheatsheet",
+                defaultextension=".html",
+                initialfile="kodex-cheatsheet.html",
+                filetypes=[("HTML files", "*.html"), ("All files", "*.*")],
+            )
+            if path:
+                generate_cheatsheet(self.db, path)
+                messagebox.showinfo("Kodex", f"Cheatsheet saved to:\n{path}", parent=win)
 
-                    with dpg.table(header_row=False, borders_innerV=False, borders_outerH=False):
-                        dpg.add_table_column(width_fixed=True, init_width_or_weight=150)
-                        dpg.add_table_column()
+        ctk.CTkButton(prn_inner, text="Generate Cheatsheet", command=_do_cheatsheet).pack(
+            anchor="w"
+        )
 
-                        with dpg.table_row():
-                            dpg.add_text("Hotstrings:")
-                            dpg.add_text(str(total_hs), color=(100, 200, 255))
+        # ── Stats Tab ──
+        stats = tabview.add("Stats")
+        stats_inner = ctk.CTkFrame(stats, fg_color="transparent")
+        stats_inner.pack(fill="both", expand=True, padx=8, pady=12)
 
-                        with dpg.table_row():
-                            dpg.add_text("Bundles:")
-                            dpg.add_text(str(total_bundles), color=(100, 200, 255))
+        def _stat_row(label: str, value: str) -> None:
+            row = ctk.CTkFrame(stats_inner, fg_color="transparent")
+            row.pack(fill="x", pady=4)
+            ctk.CTkLabel(row, text=label, width=160, anchor="w").pack(side="left")
+            ctk.CTkLabel(
+                row, text=value, text_color="#64C8FF", anchor="w"
+            ).pack(side="left")
 
-                        with dpg.table_row():
-                            dpg.add_text("Expansions:")
-                            dpg.add_text(f"{expanded:,}", color=(100, 200, 255))
+        _stat_row("Hotstrings:", str(total_hs))
+        _stat_row("Bundles:", str(total_bundles))
+        _stat_row("Expansions:", f"{expanded:,}")
+        _stat_row("Characters saved:", f"{chars:,}")
+        _stat_row("Hours saved:", f"{hours:.1f}")
 
-                        with dpg.table_row():
-                            dpg.add_text("Characters saved:")
-                            dpg.add_text(f"{chars:,}", color=(100, 200, 255))
+        # ── Bottom buttons ──
+        btn_row = ctk.CTkFrame(win, fg_color="transparent")
+        btn_row.pack(fill="x", padx=16, pady=(0, 16))
 
-                        with dpg.table_row():
-                            dpg.add_text("Hours saved:")
-                            dpg.add_text(f"{hours:.1f}", color=(100, 200, 255))
+        def _on_save():
+            cfg.hotkey_create = hk_create_var.get()
+            cfg.hotkey_manage = hk_manage_var.get()
+            cfg.hotkey_disable = hk_disable_var.get()
+            cfg.hotkey_tracker = hk_tracker_var.get()
+            cfg.send_mode = (
+                SendMode.CLIPBOARD if mode_var.get() == "Clipboard" else SendMode.DIRECT
+            )
+            cfg.play_sound = sound_var.get()
+            cfg.run_at_startup = startup_var.get()
+            cfg.autocorrect_enabled = autocorrect_var.get()
+            save_config(self.db, cfg)
+            win.grab_release()
+            win.destroy()
 
-            dpg.add_spacer(height=12)
+        def _on_cancel():
+            win.grab_release()
+            win.destroy()
 
-            # Buttons
-            with dpg.group(horizontal=True):
-                dpg.add_button(label="Cancel", callback=_on_cancel, width=80)
-                dpg.add_spacer(width=8)
-                dpg.add_button(label="Save", callback=_on_save, width=80)
+        win.bind("<Escape>", lambda _: _on_cancel())
 
-        # Wait for dialog to close
-        while dpg.does_item_exist(self._dialog_tag) and dpg.is_dearpygui_running():
-            dpg.render_dearpygui_frame()
+        ctk.CTkButton(btn_row, text="Cancel", command=_on_cancel, width=80).pack(
+            side="left", padx=(0, 8)
+        )
+        ctk.CTkButton(btn_row, text="Save", command=_on_save, width=80).pack(side="left")
 
-    def _close_dialog(self) -> None:
-        self._closed = True
-        if dpg.does_item_exist(self._dialog_tag):
-            dpg.delete_item(self._dialog_tag)
-
-    def _show_info(self, message: str) -> None:
-        """Show an info popup."""
-        info_tag = f"pref_info_{id(self)}"
-
-        def _close_info():
-            if dpg.does_item_exist(info_tag):
-                dpg.delete_item(info_tag)
-
-        with dpg.window(
-            label="Kodex",
-            tag=info_tag,
-            modal=True,
-            no_close=True,
-            width=350,
-            height=100,
-            pos=[300, 200],
-        ):
-            dpg.add_text(message)
-            dpg.add_spacer(height=12)
-            dpg.add_button(label="OK", callback=_close_info, width=60)
+        win.wait_window()

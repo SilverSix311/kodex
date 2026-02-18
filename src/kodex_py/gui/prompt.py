@@ -7,122 +7,104 @@ and lets the user fill in the %p placeholder.
 from __future__ import annotations
 
 import logging
+import threading
+
+import customtkinter as ctk
 
 log = logging.getLogger(__name__)
 
-# Result storage for the modal dialog
-_prompt_result: str | None = None
+
+def _get_root(parent=None):
+    """Return the best available Tk root for parenting dialogs."""
+    if parent is not None:
+        return parent
+    try:
+        from kodex_py.tray import get_tk_root
+        root = get_tk_root()
+        if root is not None:
+            return root
+    except Exception:
+        pass
+    return None
+
+
+def _show_prompt_dialog(template: str, parent=None) -> str | None:
+    """Must be called from the main thread. Shows a modal prompt dialog."""
+    result: list[str | None] = [None]
+
+    win = ctk.CTkToplevel(parent)
+    win.title("Kodex — Fill In")
+    win.geometry("440x300")
+    win.resizable(False, False)
+    win.attributes("-topmost", True)
+    win.grab_set()
+    win.lift()
+    win.focus_force()
+
+    # Template display
+    display_template = template.replace("%p", "[%p]")
+
+    outer = ctk.CTkFrame(win, fg_color="transparent")
+    outer.pack(fill="both", expand=True, padx=16, pady=16)
+
+    ctk.CTkLabel(outer, text="Template:", anchor="w").pack(fill="x", pady=(0, 4))
+
+    template_box = ctk.CTkTextbox(outer, height=90, wrap="word", state="disabled")
+    template_box.pack(fill="x", pady=(0, 12))
+    template_box.configure(state="normal")
+    template_box.insert("1.0", display_template)
+    template_box.configure(state="disabled")
+
+    ctk.CTkLabel(outer, text="Fill in:", anchor="w").pack(fill="x", pady=(0, 4))
+    input_entry = ctk.CTkEntry(outer, width=400)
+    input_entry.pack(fill="x", pady=(0, 16))
+
+    def _on_ok(_event=None):
+        result[0] = input_entry.get()
+        win.grab_release()
+        win.destroy()
+
+    def _on_cancel(_event=None):
+        result[0] = None
+        win.grab_release()
+        win.destroy()
+
+    win.bind("<Return>", _on_ok)
+    win.bind("<Escape>", _on_cancel)
+
+    btn_row = ctk.CTkFrame(outer, fg_color="transparent")
+    btn_row.pack(fill="x")
+    ctk.CTkButton(btn_row, text="Cancel", command=_on_cancel, width=80).pack(side="left", padx=(0, 8))
+    ctk.CTkButton(btn_row, text="OK", command=_on_ok, width=80).pack(side="left")
+
+    input_entry.focus_set()
+    win.wait_window()
+
+    return result[0]
 
 
 def show_prompt(template: str, parent=None) -> str | None:
     """Show a prompt dialog for the %p variable.
 
     Returns the user's input, or None if cancelled.
-
-    Note: This creates a temporary viewport if Dear PyGui isn't already running.
-    When called from an existing DPG context, it creates a modal window.
+    Thread-safe: can be called from any thread.
     """
-    import dearpygui.dearpygui as dpg
+    if threading.current_thread() is threading.main_thread():
+        return _show_prompt_dialog(template, parent)
 
-    global _prompt_result
-    _prompt_result = None
+    # Called from background thread — schedule on main thread and wait
+    result: list[str | None] = [None]
+    done = threading.Event()
 
-    # Check if DPG context exists
-    dpg_running = False
-    try:
-        dpg_running = dpg.is_dearpygui_running()
-    except Exception:
-        pass
+    root = _get_root(parent)
+    if root is None:
+        log.warning("show_prompt: no Tk root available, returning empty string")
+        return ""
 
-    dialog_tag = "prompt_dialog"
-    input_tag = "prompt_input"
+    def _do():
+        result[0] = _show_prompt_dialog(template, parent)
+        done.set()
 
-    def _on_ok():
-        global _prompt_result
-        _prompt_result = dpg.get_value(input_tag)
-        dpg.delete_item(dialog_tag)
-        if not dpg_running:
-            dpg.stop_dearpygui()
-
-    def _on_cancel():
-        global _prompt_result
-        _prompt_result = None
-        dpg.delete_item(dialog_tag)
-        if not dpg_running:
-            dpg.stop_dearpygui()
-
-    def _on_key_press(sender, app_data):
-        if app_data == dpg.mvKey_Return:
-            _on_ok()
-        elif app_data == dpg.mvKey_Escape:
-            _on_cancel()
-
-    def _build_dialog():
-        # Highlight %p in template for display
-        display_template = template.replace("%p", "[%p]")
-
-        with dpg.window(
-            label="Kodex — Fill In",
-            tag=dialog_tag,
-            modal=True,
-            no_close=True,
-            width=420,
-            height=280,
-            pos=[100, 100],
-        ):
-            dpg.add_text("Template:")
-            dpg.add_input_text(
-                default_value=display_template,
-                multiline=True,
-                readonly=True,
-                height=80,
-                width=-1,
-            )
-
-            dpg.add_spacer(height=8)
-            dpg.add_text("Fill in:")
-            dpg.add_input_text(
-                tag=input_tag,
-                width=-1,
-                on_enter=True,
-                callback=lambda: _on_ok(),
-            )
-
-            dpg.add_spacer(height=12)
-            with dpg.group(horizontal=True):
-                dpg.add_button(label="Cancel", callback=_on_cancel, width=80)
-                dpg.add_button(label="OK", callback=_on_ok, width=80)
-
-        # Focus the input
-        dpg.focus_item(input_tag)
-
-        # Key handler for enter/escape
-        with dpg.handler_registry(tag="prompt_key_handler"):
-            dpg.add_key_press_handler(callback=_on_key_press)
-
-    if dpg_running:
-        # Already running — just add modal window
-        _build_dialog()
-        # Wait for dialog to close (busy-wait since we're in existing loop)
-        while dpg.does_item_exist(dialog_tag):
-            pass
-    else:
-        # Create temporary context
-        dpg.create_context()
-        dpg.create_viewport(title="Kodex — Fill In", width=440, height=300, always_on_top=True)
-        dpg.setup_dearpygui()
-
-        _build_dialog()
-
-        dpg.show_viewport()
-        dpg.start_dearpygui()
-        dpg.destroy_context()
-
-    # Cleanup key handler if it exists
-    try:
-        if dpg.does_item_exist("prompt_key_handler"):
-            dpg.delete_item("prompt_key_handler")
-    except Exception:
-        pass
-
-    return _prompt_result
+    root.after(0, _do)
+    done.wait(timeout=300)  # 5-minute timeout
+    return result[0]

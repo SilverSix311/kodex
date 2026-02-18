@@ -1,4 +1,4 @@
-"""System tray icon and menu — powered by pystray with Dear PyGui GUI.
+"""System tray icon and menu — powered by pystray with CustomTkinter GUI.
 
 Fully connected to the GUI and ticket tracker:
     • Manage hotstrings  → opens ManagementWindow
@@ -10,8 +10,8 @@ Fully connected to the GUI and ticket tracker:
     • Exit
 
 Threading model:
-  - Main thread: Dear PyGui render loop (required for responsive GUI)
-  - Background thread: pystray icon
+  - Main thread: tkinter/CTk event loop (required for GUI on Windows)
+  - Background thread: pystray icon (must NOT create Tk widgets)
 """
 
 from __future__ import annotations
@@ -20,15 +20,19 @@ import logging
 import threading
 from typing import TYPE_CHECKING
 
-import dearpygui.dearpygui as dpg
-
 if TYPE_CHECKING:
     from kodex_py.app import KodexApp
 
 log = logging.getLogger(__name__)
 
-# Global flag for shutdown coordination
-_shutdown_requested = False
+# Module-level reference to the hidden CTk root (set by run_tray).
+# Other GUI modules import this to parent their Toplevel windows.
+_tk_root = None
+
+
+def get_tk_root():
+    """Return the hidden root CTk window (created by run_tray)."""
+    return _tk_root
 
 
 def _create_icon():
@@ -39,109 +43,100 @@ def _create_icon():
 
 
 def run_tray(app: "KodexApp") -> None:
-    """Build and run the system-tray icon with Dear PyGui GUI support.
+    """Build and run the system-tray icon with CustomTkinter GUI support.
 
     Threading model:
-      - Main thread: Dear PyGui render loop (required for responsive GUI on Windows)
+      - Main thread: CTk event loop (blocks here via root.mainloop())
       - Background thread: pystray icon
     """
+    import customtkinter as ctk
     import pystray
 
-    global _shutdown_requested
-    _shutdown_requested = False
+    global _tk_root
 
-    # ── Initialize Dear PyGui ──
-    dpg.create_context()
-    dpg.create_viewport(title="Kodex", width=900, height=600, min_width=600, min_height=400)
+    # ── Configure CustomTkinter ──────────────────────────────────────
+    ctk.set_appearance_mode("dark")
+    ctk.set_default_color_theme("blue")
 
-    dpg.setup_dearpygui()
-    dpg.show_viewport()
+    # Hidden root window — all Toplevel windows are children of this.
+    root = ctk.CTk()
+    root.withdraw()         # Keep hidden; we live in the tray
+    root.title("Kodex")
+    root.protocol("WM_DELETE_WINDOW", lambda: None)  # Prevent accidental close
+    _tk_root = root
 
-    # Start minimized - we're tray-only by default
-    dpg.minimize_viewport()
+    # ── Cached GUI window instances ──────────────────────────────────
+    _management_window: list = [None]   # list so lambda can rebind
 
-    # GUI window instances (lazy-created)
-    _management_window = [None]
+    # ── Helpers ─────────────────────────────────────────────────────
 
-    # Thread-safe queue for GUI actions
-    _gui_actions = []
-    _gui_lock = threading.Lock()
+    def _schedule(fn) -> None:
+        """Schedule *fn* to run on the tkinter main thread (safe from any thread)."""
+        root.after(0, fn)
 
-    def _schedule(fn):
-        """Schedule a function to run on the Dear PyGui main thread."""
-        with _gui_lock:
-            _gui_actions.append(fn)
+    # ── Tray callbacks (run on the pystray thread) ───────────────────
 
-    def _process_scheduled():
-        """Process any scheduled GUI actions (called from main loop)."""
-        with _gui_lock:
-            actions = _gui_actions.copy()
-            _gui_actions.clear()
-        for fn in actions:
-            try:
-                fn()
-            except Exception as e:
-                log.error("Error in scheduled GUI action: %s", e)
-
-    def on_manage(icon, item):
+    def on_manage(icon, item) -> None:
         def _do():
             from kodex_py.gui.manager import ManagementWindow
 
-            if _management_window[0] is None:
+            win = _management_window[0]
+            if win is None or not win._window or not win._window.winfo_exists():
                 _management_window[0] = ManagementWindow(
-                    app.db, on_reload=app.reload_hotstrings
+                    app.db, on_reload=app.reload_hotstrings, parent=root
                 )
             _management_window[0].show()
 
         _schedule(_do)
 
-    def on_new_hotstring(icon, item):
+    def on_new_hotstring(icon, item) -> None:
         def _do():
             from kodex_py.gui.editor import NewHotstringDialog
 
-            dialog = NewHotstringDialog(app.db)
+            dialog = NewHotstringDialog(app.db, default_bundle="Default", parent=root)
             dialog.show()
             app.reload_hotstrings()
 
         _schedule(_do)
 
-    def on_preferences(icon, item):
+    def on_preferences(icon, item) -> None:
         def _do():
             from kodex_py.gui.preferences import PreferencesWindow
 
-            prefs = PreferencesWindow(app.db)
-            prefs.show()
+            PreferencesWindow(app.db, parent=root).show()
 
         _schedule(_do)
 
-    def on_tracker(icon, item):
+    def on_tracker(icon, item) -> None:
         if hasattr(app, "tracker") and app.tracker is not None:
             msg = app.tracker.toggle()
             log.info("Tracker: %s", msg)
 
-    def on_disable(icon, item):
+    def on_disable(icon, item) -> None:
         app.disabled = not app.disabled
         log.info("Kodex %s", "disabled" if app.disabled else "enabled")
 
-    def on_exit(icon, item):
-        global _shutdown_requested
-        if hasattr(app, "tracker") and app.tracker is not None and app.tracker.is_tracking:
-            app.tracker.stop()
-        app.stop()
-        icon.stop()
-        _shutdown_requested = True
+    def on_exit(icon, item) -> None:
+        def _do():
+            if hasattr(app, "tracker") and app.tracker is not None and app.tracker.is_tracking:
+                app.tracker.stop()
+            app.stop()
+            icon.stop()
+            root.quit()
 
-    def _disable_text(item):
+        _schedule(_do)
+
+    # Dynamic label callbacks (called by pystray to refresh menu text)
+    def _disable_text(item) -> str:
         return "Enable" if app.disabled else "Disable"
 
-    def _tracker_text(item):
+    def _tracker_text(item) -> str:
         if hasattr(app, "tracker") and app.tracker is not None and app.tracker.is_tracking:
             return f"Stop Tracker (#{app.tracker.ticket_number})"
         return "Start Ticket Tracker"
 
+    # ── Icon image ───────────────────────────────────────────────────
     icon_image = _create_icon()
-
-    # Try to load a real icon
     try:
         from PIL import Image
 
@@ -151,12 +146,13 @@ def run_tray(app: "KodexApp") -> None:
     except Exception:
         pass
 
+    # ── pystray menu ────────────────────────────────────────────────
     menu = pystray.Menu(
         pystray.MenuItem("Kodex v3.0", None, enabled=False),
         pystray.Menu.SEPARATOR,
         pystray.MenuItem("Manage Hotstrings", on_manage),
         pystray.MenuItem("Create New Hotstring", on_new_hotstring),
-        pystray.MenuItem("Preferences...", on_preferences),
+        pystray.MenuItem("Preferences…", on_preferences),
         pystray.Menu.SEPARATOR,
         pystray.MenuItem(_tracker_text, on_tracker),
         pystray.Menu.SEPARATOR,
@@ -167,15 +163,11 @@ def run_tray(app: "KodexApp") -> None:
 
     icon = pystray.Icon("kodex", icon_image, "Kodex", menu)
 
-    # Run pystray in a background thread
+    # ── Launch pystray in background thread ─────────────────────────
     tray_thread = threading.Thread(target=icon.run, daemon=True, name="pystray")
     tray_thread.start()
 
-    # ── Main Dear PyGui render loop ──
-    while dpg.is_dearpygui_running() and not _shutdown_requested:
-        # Process scheduled GUI actions from other threads
-        _process_scheduled()
-        dpg.render_dearpygui_frame()
-
-    # Cleanup
-    dpg.destroy_context()
+    # ── Run CTk event loop on main thread (blocks until root.quit()) ─
+    log.info("Starting CTk event loop on main thread")
+    root.mainloop()
+    log.info("CTk event loop exited")

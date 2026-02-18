@@ -12,15 +12,23 @@ Mirrors the AHK management_GUI.ahk:
 from __future__ import annotations
 
 import logging
+import tkinter as tk
+from tkinter import filedialog, messagebox, simpledialog
 from typing import TYPE_CHECKING, Callable
 
-import dearpygui.dearpygui as dpg
+import customtkinter as ctk
 
 if TYPE_CHECKING:
     from kodex_py.storage.database import Database
     from kodex_py.storage.models import Bundle, Hotstring
 
 log = logging.getLogger(__name__)
+
+# Colours for native Listbox (matches CTk dark theme)
+_LIST_BG = "#2b2b2b"
+_LIST_FG = "#dce4ee"
+_LIST_SELECT_BG = "#1f6aa5"
+_LIST_FONT = ("Helvetica", 12)
 
 
 class ManagementWindow:
@@ -30,560 +38,513 @@ class ManagementWindow:
         self,
         db: "Database",
         on_reload: Callable[[], None] | None = None,
+        parent=None,
     ) -> None:
         self.db = db
         self._on_reload = on_reload
-        self._window_tag = "management_window"
+        self._parent = parent
+
+        # Window state
+        self._window: ctk.CTkToplevel | None = None
+        self._tabview: ctk.CTkTabview | None = None
+
+        # Bundle → listbox mapping, rebuilt with tabs
+        self._bundle_listboxes: dict[int, tk.Listbox] = {}
+        self._tab_names: list[str] = []          # names in order (for deletion)
+        self._bundle_name_to_id: dict[str, int] = {}
+
+        # Selected state
         self._current_bundle_id: int | None = None
         self._current_hs_id: int | None = None
         self._hotstrings_cache: list["Hotstring"] = []
 
-        # Widget tags (will be set in show())
-        self._tags: dict[str, str] = {}
+        # Editor widget variables (created during _build_window, reused across tab rebuilds)
+        self._search_var: tk.StringVar | None = None
+        self._name_var: tk.StringVar | None = None
+        self._script_var: tk.BooleanVar | None = None
+        self._replacement_text: ctk.CTkTextbox | None = None
+        self._trig_space_var: tk.BooleanVar | None = None
+        self._trig_tab_var: tk.BooleanVar | None = None
+        self._trig_enter_var: tk.BooleanVar | None = None
+        self._trig_instant_var: tk.BooleanVar | None = None
+
+    # ── Public API ──────────────────────────────────────────────────
 
     def show(self) -> None:
-        """Create and show the management window."""
-        # If window exists, focus it
-        if dpg.does_item_exist(self._window_tag):
-            dpg.focus_item(self._window_tag)
+        """Create and show the management window (or bring to front if already open)."""
+        if self._window is not None and self._window.winfo_exists():
+            self._window.deiconify()
+            self._window.lift()
+            self._window.focus_force()
             return
+        self._build_window()
 
-        # Generate unique tags
-        wid = id(self)
-        self._tags = {
-            "search": f"mgr_search_{wid}",
-            "tab_bar": f"mgr_tabs_{wid}",
-            "list": f"mgr_list_{wid}",
-            "name": f"mgr_name_{wid}",
-            "script": f"mgr_script_{wid}",
-            "replacement": f"mgr_repl_{wid}",
-            "trig_space": f"mgr_trig_space_{wid}",
-            "trig_tab": f"mgr_trig_tab_{wid}",
-            "trig_enter": f"mgr_trig_enter_{wid}",
-            "trig_instant": f"mgr_trig_instant_{wid}",
-        }
+    # ── Window construction ──────────────────────────────────────────
 
-        def _on_close():
-            if dpg.does_item_exist(self._window_tag):
-                dpg.delete_item(self._window_tag)
+    def _build_window(self) -> None:
+        win = ctk.CTkToplevel(self._parent)
+        self._window = win
+        win.title("Kodex — Manage Hotstrings")
+        win.geometry("980x700")
+        win.minsize(720, 520)
 
-        with dpg.window(
-            label="Kodex — Manage Hotstrings",
-            tag=self._window_tag,
-            width=920,
-            height=620,
-            pos=[50, 50],
-            on_close=_on_close,
-        ):
-            # ── Menu Bar ──
-            with dpg.menu_bar():
-                with dpg.menu(label="Tools"):
-                    dpg.add_menu_item(label="Preferences...", callback=self._open_preferences)
-                    dpg.add_menu_item(
-                        label="Printable Cheatsheet", callback=self._generate_cheatsheet
-                    )
+        # ── Variables ──
+        self._search_var = tk.StringVar()
+        self._search_var.trace_add("write", lambda *_: self._filter_list())
+        self._name_var = tk.StringVar()
+        self._script_var = tk.BooleanVar()
+        self._trig_space_var = tk.BooleanVar(value=True)
+        self._trig_tab_var = tk.BooleanVar()
+        self._trig_enter_var = tk.BooleanVar()
+        self._trig_instant_var = tk.BooleanVar()
 
-                with dpg.menu(label="Bundles"):
-                    dpg.add_menu_item(label="New Bundle...", callback=self._new_bundle)
-                    dpg.add_menu_item(label="Rename Bundle...", callback=self._rename_bundle)
-                    dpg.add_menu_item(label="Delete Bundle...", callback=self._delete_bundle)
-                    dpg.add_separator()
-                    dpg.add_menu_item(label="Export Bundle...", callback=self._export_bundle)
-                    dpg.add_menu_item(label="Import Bundle...", callback=self._import_bundle)
+        # ── Menu bar ──
+        menubar = tk.Menu(win)
 
-            # ── Search Bar ──
-            with dpg.group(horizontal=True):
-                dpg.add_text("Search:")
-                dpg.add_input_text(
-                    tag=self._tags["search"],
-                    width=300,
-                    callback=lambda s, a: self._filter_list(),
-                )
+        _m_kw = dict(tearoff=0, bg="#2b2b2b", fg="#dce4ee",
+                     activebackground="#1f6aa5", activeforeground="white")
 
-            dpg.add_spacer(height=4)
+        tools_menu = tk.Menu(menubar, **_m_kw)
+        tools_menu.add_command(label="Preferences…", command=self._open_preferences)
+        tools_menu.add_command(label="Printable Cheatsheet", command=self._generate_cheatsheet)
+        menubar.add_cascade(label="Tools", menu=tools_menu)
 
-            # ── Bundle Tabs ──
-            with dpg.tab_bar(tag=self._tags["tab_bar"], callback=self._on_tab_changed):
-                pass  # Tabs added dynamically
+        bundles_menu = tk.Menu(menubar, **_m_kw)
+        bundles_menu.add_command(label="New Bundle…", command=self._new_bundle)
+        bundles_menu.add_command(label="Rename Bundle…", command=self._rename_bundle)
+        bundles_menu.add_command(label="Delete Bundle…", command=self._delete_bundle)
+        bundles_menu.add_separator()
+        bundles_menu.add_command(label="Export Bundle…", command=self._export_bundle)
+        bundles_menu.add_command(label="Import Bundle…", command=self._import_bundle)
+        menubar.add_cascade(label="Bundles", menu=bundles_menu)
 
-            dpg.add_spacer(height=4)
+        win.config(menu=menubar)
 
-            # ── Main Content (List + Editor) ──
-            with dpg.group(horizontal=True):
-                # Left: Hotstring list
-                with dpg.child_window(width=280, height=-40):
-                    dpg.add_listbox(
-                        tag=self._tags["list"],
-                        items=[],
-                        num_items=20,
-                        width=-1,
-                        callback=self._on_select,
-                    )
+        # ── Outer frame ──
+        outer = ctk.CTkFrame(win, fg_color="transparent")
+        outer.pack(fill="both", expand=True, padx=10, pady=10)
 
-                dpg.add_spacer(width=8)
+        # ── Search bar ──
+        search_row = ctk.CTkFrame(outer, fg_color="transparent")
+        search_row.pack(fill="x", pady=(0, 8))
+        ctk.CTkLabel(search_row, text="Search:").pack(side="left", padx=(0, 8))
+        ctk.CTkEntry(search_row, textvariable=self._search_var, width=320).pack(side="left")
 
-                # Right: Editor
-                with dpg.child_window(width=-1, height=-40):
-                    # Name row
-                    with dpg.group(horizontal=True):
-                        dpg.add_text("Name:")
-                        dpg.add_input_text(tag=self._tags["name"], width=250)
-                        dpg.add_spacer(width=20)
-                        dpg.add_checkbox(label="Script mode", tag=self._tags["script"])
+        # ── Content: tabs (left) + editor (right) ──
+        content = ctk.CTkFrame(outer, fg_color="transparent")
+        content.pack(fill="both", expand=True, pady=(0, 8))
+        content.grid_columnconfigure(0, weight=0, minsize=290)
+        content.grid_columnconfigure(1, weight=1)
+        content.grid_rowconfigure(0, weight=1)
 
-                    dpg.add_spacer(height=8)
+        # Left: bundle tabs with embedded listboxes
+        tabs_container = ctk.CTkFrame(content, fg_color="transparent")
+        tabs_container.grid(row=0, column=0, sticky="nsew")
 
-                    # Triggers
-                    with dpg.collapsing_header(label="Triggers", default_open=True):
-                        with dpg.group(horizontal=True):
-                            dpg.add_checkbox(
-                                label="Space",
-                                tag=self._tags["trig_space"],
-                            )
-                            dpg.add_checkbox(
-                                label="Tab",
-                                tag=self._tags["trig_tab"],
-                            )
-                            dpg.add_checkbox(
-                                label="Enter",
-                                tag=self._tags["trig_enter"],
-                            )
-                            dpg.add_checkbox(
-                                label="Instant",
-                                tag=self._tags["trig_instant"],
-                                callback=self._on_instant_toggle,
-                            )
+        self._tabview = ctk.CTkTabview(tabs_container, command=self._on_tab_change)
+        self._tabview.pack(fill="both", expand=True)
 
-                    dpg.add_spacer(height=8)
+        # Right: editor panel
+        editor_frame = ctk.CTkFrame(content)
+        editor_frame.grid(row=0, column=1, sticky="nsew", padx=(10, 0))
+        self._build_editor(editor_frame)
 
-                    # Replacement text
-                    dpg.add_text("Replacement:")
-                    dpg.add_input_text(
-                        tag=self._tags["replacement"],
-                        multiline=True,
-                        width=-1,
-                        height=280,
-                    )
+        # ── Bottom buttons ──
+        btn_row = ctk.CTkFrame(outer, fg_color="transparent")
+        btn_row.pack(fill="x")
+        ctk.CTkButton(btn_row, text="+ New", command=self._new_hotstring, width=88).pack(
+            side="left", padx=(0, 8)
+        )
+        ctk.CTkButton(btn_row, text="Save", command=self._save_hotstring, width=88).pack(
+            side="left", padx=(0, 8)
+        )
+        ctk.CTkButton(
+            btn_row, text="Delete", command=self._delete_hotstring, width=88,
+            fg_color="#8B0000", hover_color="#A50000"
+        ).pack(side="left")
 
-            # ── Bottom Buttons ──
-            with dpg.group(horizontal=True):
-                dpg.add_button(label="+ New", callback=self._new_hotstring, width=80)
-                dpg.add_spacer(width=8)
-                dpg.add_button(label="Save", callback=self._save_hotstring, width=80)
-                dpg.add_spacer(width=8)
-                dpg.add_button(label="Delete", callback=self._delete_hotstring, width=80)
-
-        # Populate tabs
+        # ── Populate tabs ──
         self._rebuild_tabs()
 
-    def _on_close(self) -> None:
-        if dpg.does_item_exist(self._window_tag):
-            dpg.delete_item(self._window_tag)
+    def _build_editor(self, parent: ctk.CTkFrame) -> None:
+        """Build the editor panel (called once; widgets bound to instance vars)."""
+        pad = {"padx": 12, "pady": (0, 8)}
 
-    # ── Tab management ──
+        # Name + script mode
+        name_row = ctk.CTkFrame(parent, fg_color="transparent")
+        name_row.pack(fill="x", padx=12, pady=(12, 8))
+        ctk.CTkLabel(name_row, text="Name:").pack(side="left", padx=(0, 8))
+        ctk.CTkEntry(name_row, textvariable=self._name_var, width=200).pack(side="left")
+        ctk.CTkCheckBox(
+            name_row, text="Script mode", variable=self._script_var
+        ).pack(side="left", padx=(16, 0))
 
-    def _rebuild_tabs(self) -> None:
-        """Rebuild bundle tabs from database."""
-        tab_bar = self._tags["tab_bar"]
-        if not dpg.does_item_exist(tab_bar):
+        # Triggers
+        trig_outer = ctk.CTkFrame(parent, corner_radius=6, fg_color=("gray85", "gray20"))
+        trig_outer.pack(fill="x", **pad)
+        ctk.CTkLabel(
+            trig_outer, text="Triggers", font=ctk.CTkFont(weight="bold"), anchor="w"
+        ).pack(anchor="w", padx=12, pady=(8, 4))
+        trig_row = ctk.CTkFrame(trig_outer, fg_color="transparent")
+        trig_row.pack(fill="x", padx=12, pady=(0, 8))
+        ctk.CTkCheckBox(trig_row, text="Space", variable=self._trig_space_var).pack(
+            side="left", padx=(0, 12)
+        )
+        ctk.CTkCheckBox(trig_row, text="Tab", variable=self._trig_tab_var).pack(
+            side="left", padx=(0, 12)
+        )
+        ctk.CTkCheckBox(trig_row, text="Enter", variable=self._trig_enter_var).pack(
+            side="left", padx=(0, 12)
+        )
+        ctk.CTkCheckBox(
+            trig_row, text="Instant",
+            variable=self._trig_instant_var,
+            command=self._on_instant_toggle,
+        ).pack(side="left")
+
+        # Replacement text
+        ctk.CTkLabel(parent, text="Replacement:", anchor="w").pack(
+            anchor="w", padx=12, pady=(0, 4)
+        )
+        self._replacement_text = ctk.CTkTextbox(parent, wrap="word")
+        self._replacement_text.pack(fill="both", expand=True, padx=12, pady=(0, 12))
+
+    # ── Tab management ──────────────────────────────────────────────
+
+    def _rebuild_tabs(self, preserve_bundle: int | None = None) -> None:
+        """Rebuild bundle tabs from database. Preserves selection if possible."""
+        if self._tabview is None:
             return
 
-        # Clear existing tabs
-        children = dpg.get_item_children(tab_bar, 1)
-        if children:
-            for child in children:
-                dpg.delete_item(child)
+        # Remember which bundle we're on (if not given)
+        if preserve_bundle is None:
+            preserve_bundle = self._current_bundle_id
 
-        # Add tabs for each bundle
+        # Delete all existing tabs
+        for name in list(self._tab_names):
+            try:
+                self._tabview.delete(name)
+            except Exception:
+                pass
+        self._tab_names.clear()
+        self._bundle_listboxes.clear()
+        self._bundle_name_to_id.clear()
+
         bundles = self.db.get_bundles()
         for b in bundles:
-            label = f"{b.name}" + ("" if b.enabled else " (disabled)")
-            # Store bundle_id as user_data
-            dpg.add_tab(label=label, parent=tab_bar, user_data=b.id)
+            label = b.name + ("" if b.enabled else " (disabled)")
+            tab_frame = self._tabview.add(label)
+            self._tab_names.append(label)
+            self._bundle_name_to_id[label] = b.id
 
+            # Listbox with scrollbar inside the tab frame
+            lb_frame = ctk.CTkFrame(tab_frame, fg_color="transparent")
+            lb_frame.pack(fill="both", expand=True, padx=4, pady=4)
+
+            scrollbar = tk.Scrollbar(lb_frame)
+            scrollbar.pack(side="right", fill="y")
+
+            lb = tk.Listbox(
+                lb_frame,
+                bg=_LIST_BG,
+                fg=_LIST_FG,
+                selectbackground=_LIST_SELECT_BG,
+                selectforeground="white",
+                borderwidth=0,
+                highlightthickness=1,
+                highlightcolor="#555555",
+                highlightbackground="#3a3a3a",
+                activestyle="none",
+                font=_LIST_FONT,
+                yscrollcommand=scrollbar.set,
+            )
+            lb.pack(side="left", fill="both", expand=True)
+            scrollbar.config(command=lb.yview)
+            lb.bind("<<ListboxSelect>>", lambda _e, _lb=lb: self._on_select(_lb))
+
+            self._bundle_listboxes[b.id] = lb
+
+        # Restore or pick first bundle
         if bundles:
-            self._current_bundle_id = bundles[0].id
+            target_id = preserve_bundle if preserve_bundle else bundles[0].id
+            target = next((b for b in bundles if b.id == target_id), bundles[0])
+            target_label = target.name + ("" if target.enabled else " (disabled)")
+            self._current_bundle_id = target.id
+            try:
+                self._tabview.set(target_label)
+            except Exception:
+                pass
             self._load_hotstrings()
 
-    def _on_tab_changed(self, sender, app_data) -> None:
-        """Handle tab selection change."""
-        if app_data is None:
+    def _on_tab_change(self) -> None:
+        """Called by CTkTabview when the user switches tabs (no args)."""
+        if self._tabview is None:
             return
-        # app_data is the selected tab's tag
-        bundle_id = dpg.get_item_user_data(app_data)
-        if bundle_id is not None:
+        name = self._tabview.get()
+        bundle_id = self._bundle_name_to_id.get(name)
+        if bundle_id is not None and bundle_id != self._current_bundle_id:
             self._current_bundle_id = bundle_id
+            self._current_hs_id = None
+            self._clear_editor()
             self._load_hotstrings()
 
-    # ── Hotstring list ──
+    # ── Hotstring list ──────────────────────────────────────────────
 
     def _load_hotstrings(self) -> None:
-        """Load hotstrings for current bundle."""
         if self._current_bundle_id is None:
             return
         self._hotstrings_cache = self.db.get_hotstrings(bundle_id=self._current_bundle_id)
         self._filter_list()
 
     def _filter_list(self) -> None:
-        """Filter and update the hotstring list."""
-        if not dpg.does_item_exist(self._tags["list"]):
+        lb = self._bundle_listboxes.get(self._current_bundle_id)
+        if lb is None:
             return
-
-        query = dpg.get_value(self._tags["search"]).lower() if dpg.does_item_exist(self._tags["search"]) else ""
-        items = []
+        query = (self._search_var.get().lower() if self._search_var else "")
+        lb.delete(0, tk.END)
         for hs in self._hotstrings_cache:
             if query and query not in hs.name.lower() and query not in hs.replacement.lower():
                 continue
-            items.append(hs.name)
+            lb.insert(tk.END, hs.name)
 
-        dpg.configure_item(self._tags["list"], items=items)
-
-    def _on_select(self, sender, app_data) -> None:
-        """Handle hotstring selection."""
-        name = app_data
-        if not name:
+    def _on_select(self, lb: tk.Listbox) -> None:
+        sel = lb.curselection()
+        if not sel:
             return
+        name = lb.get(sel[0])
         for hs in self._hotstrings_cache:
             if hs.name == name:
                 self._show_hotstring(hs)
                 break
 
     def _show_hotstring(self, hs: "Hotstring") -> None:
-        """Display hotstring in the editor."""
         from kodex_py.storage.models import TriggerType
 
         self._current_hs_id = hs.id
-        dpg.set_value(self._tags["name"], hs.name)
-        dpg.set_value(self._tags["script"], hs.is_script)
-        dpg.set_value(self._tags["replacement"], hs.replacement)
+        self._name_var.set(hs.name)
+        self._script_var.set(hs.is_script)
 
-        dpg.set_value(self._tags["trig_space"], TriggerType.SPACE in hs.triggers)
-        dpg.set_value(self._tags["trig_tab"], TriggerType.TAB in hs.triggers)
-        dpg.set_value(self._tags["trig_enter"], TriggerType.ENTER in hs.triggers)
-        dpg.set_value(self._tags["trig_instant"], TriggerType.INSTANT in hs.triggers)
+        self._replacement_text.delete("1.0", tk.END)
+        self._replacement_text.insert("1.0", hs.replacement)
 
-    # ── Trigger logic ──
+        self._trig_space_var.set(TriggerType.SPACE in hs.triggers)
+        self._trig_tab_var.set(TriggerType.TAB in hs.triggers)
+        self._trig_enter_var.set(TriggerType.ENTER in hs.triggers)
+        self._trig_instant_var.set(TriggerType.INSTANT in hs.triggers)
 
-    def _on_instant_toggle(self, sender, app_data) -> None:
-        """When Instant is checked, uncheck other triggers."""
-        if app_data:  # instant checked
-            dpg.set_value(self._tags["trig_space"], False)
-            dpg.set_value(self._tags["trig_tab"], False)
-            dpg.set_value(self._tags["trig_enter"], False)
+    # ── Trigger logic ───────────────────────────────────────────────
 
-    # ── CRUD ──
+    def _on_instant_toggle(self) -> None:
+        if self._trig_instant_var.get():
+            self._trig_space_var.set(False)
+            self._trig_tab_var.set(False)
+            self._trig_enter_var.set(False)
+
+    # ── CRUD ────────────────────────────────────────────────────────
 
     def _new_hotstring(self) -> None:
-        """Open new hotstring dialog."""
         from kodex_py.gui.editor import NewHotstringDialog
 
         bundles = self.db.get_bundles()
         current_bundle = next(
             (b.name for b in bundles if b.id == self._current_bundle_id), "Default"
         )
-        dialog = NewHotstringDialog(self.db, default_bundle=current_bundle)
+        dialog = NewHotstringDialog(
+            self.db, default_bundle=current_bundle, parent=self._window
+        )
         dialog.show()
         self._load_hotstrings()
         if self._on_reload:
             self._on_reload()
 
     def _save_hotstring(self) -> None:
-        """Save current hotstring."""
         from kodex_py.storage.models import Hotstring, TriggerType
 
-        name = dpg.get_value(self._tags["name"]).strip()
+        name = self._name_var.get().strip()
         if not name:
-            self._show_warning("Hotstring name cannot be empty.")
+            messagebox.showwarning("Kodex", "Hotstring name cannot be empty.", parent=self._window)
             return
 
-        replacement = dpg.get_value(self._tags["replacement"]).rstrip("\n")
-        triggers = set()
-
-        if dpg.get_value(self._tags["trig_space"]):
+        replacement = self._replacement_text.get("1.0", tk.END).rstrip("\n")
+        triggers: set = set()
+        if self._trig_space_var.get():
             triggers.add(TriggerType.SPACE)
-        if dpg.get_value(self._tags["trig_tab"]):
+        if self._trig_tab_var.get():
             triggers.add(TriggerType.TAB)
-        if dpg.get_value(self._tags["trig_enter"]):
+        if self._trig_enter_var.get():
             triggers.add(TriggerType.ENTER)
-        if dpg.get_value(self._tags["trig_instant"]):
+        if self._trig_instant_var.get():
             triggers.add(TriggerType.INSTANT)
 
         if not triggers:
-            self._show_warning("Select at least one trigger type.")
+            messagebox.showwarning(
+                "Kodex", "Select at least one trigger type.", parent=self._window
+            )
             return
 
         hs = Hotstring(
             id=self._current_hs_id,
             name=name,
             replacement=replacement,
-            is_script=dpg.get_value(self._tags["script"]),
+            is_script=self._script_var.get(),
             bundle_id=self._current_bundle_id,
             triggers=triggers,
         )
-        self.db.save_hotstring(hs)
-        self._load_hotstrings()
-        if self._on_reload:
-            self._on_reload()
+        try:
+            self.db.save_hotstring(hs)
+            self._load_hotstrings()
+            if self._on_reload:
+                self._on_reload()
+        except Exception as e:
+            messagebox.showerror("Kodex", f"Error saving: {e}", parent=self._window)
 
     def _delete_hotstring(self) -> None:
-        """Delete current hotstring with confirmation."""
         if self._current_hs_id is None:
+            messagebox.showwarning("Kodex", "No hotstring selected.", parent=self._window)
             return
-
-        name = dpg.get_value(self._tags["name"])
-        self._show_confirm(
-            f"Delete hotstring '{name}'?",
-            self._do_delete_hotstring,
-        )
-
-    def _do_delete_hotstring(self) -> None:
-        """Actually delete the hotstring."""
-        self.db.delete_hotstring(self._current_hs_id)
-        self._current_hs_id = None
-        self._load_hotstrings()
-        self._clear_editor()
-        if self._on_reload:
-            self._on_reload()
+        name = self._name_var.get()
+        if messagebox.askyesno(
+            "Kodex", f"Delete hotstring '{name}'?", parent=self._window
+        ):
+            self.db.delete_hotstring(self._current_hs_id)
+            self._current_hs_id = None
+            self._clear_editor()
+            self._load_hotstrings()
+            if self._on_reload:
+                self._on_reload()
 
     def _clear_editor(self) -> None:
-        """Clear the editor fields."""
-        dpg.set_value(self._tags["name"], "")
-        dpg.set_value(self._tags["script"], False)
-        dpg.set_value(self._tags["replacement"], "")
-        dpg.set_value(self._tags["trig_space"], False)
-        dpg.set_value(self._tags["trig_tab"], False)
-        dpg.set_value(self._tags["trig_enter"], False)
-        dpg.set_value(self._tags["trig_instant"], False)
+        if self._name_var:
+            self._name_var.set("")
+        if self._script_var:
+            self._script_var.set(False)
+        if self._replacement_text:
+            self._replacement_text.delete("1.0", tk.END)
+        for var in (
+            self._trig_space_var,
+            self._trig_tab_var,
+            self._trig_enter_var,
+            self._trig_instant_var,
+        ):
+            if var:
+                var.set(False)
 
-    # ── Bundle management ──
+    # ── Bundle management ───────────────────────────────────────────
 
     def _new_bundle(self) -> None:
-        """Show new bundle dialog."""
-        self._show_input("Bundle name:", self._do_create_bundle)
-
-    def _do_create_bundle(self, name: str) -> None:
+        name = simpledialog.askstring("New Bundle", "Bundle name:", parent=self._window)
         if name and name.strip():
             self.db.create_bundle(name.strip())
             self._rebuild_tabs()
 
     def _rename_bundle(self) -> None:
-        """Show rename bundle dialog."""
         if self._current_bundle_id is None:
             return
-
         bundles = self.db.get_bundles()
         current = next((b for b in bundles if b.id == self._current_bundle_id), None)
         if current is None:
             return
         if current.name == "Default":
-            self._show_warning("Cannot rename the Default bundle.")
+            messagebox.showwarning(
+                "Kodex", "Cannot rename the Default bundle.", parent=self._window
+            )
             return
-
-        self._show_input(
+        new_name = simpledialog.askstring(
+            "Rename Bundle",
             f"New name for '{current.name}':",
-            self._do_rename_bundle,
-            default=current.name,
+            initialvalue=current.name,
+            parent=self._window,
         )
-
-    def _do_rename_bundle(self, new_name: str) -> None:
         if new_name and new_name.strip():
             self.db._conn.execute(
                 "UPDATE bundles SET name = ? WHERE id = ?",
                 (new_name.strip(), self._current_bundle_id),
             )
             self.db._conn.commit()
-            self._rebuild_tabs()
+            self._rebuild_tabs(preserve_bundle=self._current_bundle_id)
 
     def _delete_bundle(self) -> None:
-        """Show delete bundle confirmation."""
         if self._current_bundle_id is None:
             return
-
         bundles = self.db.get_bundles()
         current = next((b for b in bundles if b.id == self._current_bundle_id), None)
         if current is None:
             return
         if current.name == "Default":
-            self._show_warning("Cannot delete the Default bundle.")
+            messagebox.showwarning(
+                "Kodex", "Cannot delete the Default bundle.", parent=self._window
+            )
             return
-
-        self._show_confirm(
+        if messagebox.askyesno(
+            "Kodex",
             f"Delete bundle '{current.name}' and all its hotstrings?",
-            self._do_delete_bundle,
-        )
-
-    def _do_delete_bundle(self) -> None:
-        self.db.delete_bundle(self._current_bundle_id)
-        self._rebuild_tabs()
-        if self._on_reload:
-            self._on_reload()
+            parent=self._window,
+        ):
+            self.db.delete_bundle(self._current_bundle_id)
+            self._current_bundle_id = None
+            self._current_hs_id = None
+            self._rebuild_tabs()
+            if self._on_reload:
+                self._on_reload()
 
     def _export_bundle(self) -> None:
-        """Export current bundle to file."""
         from kodex_py.storage.bundle_io import export_bundle
 
         if self._current_bundle_id is None:
             return
-
         bundles = self.db.get_bundles()
         current = next((b for b in bundles if b.id == self._current_bundle_id), None)
         if current is None:
             return
-
-        def _save_callback(sender, app_data):
-            if app_data and "file_path_name" in app_data:
-                path = app_data["file_path_name"]
-                if path:
-                    count = export_bundle(self.db, current.name, path)
-                    self._show_warning(f"Exported {count} hotstrings to {path}")
-
-        dpg.add_file_dialog(
-            label="Export Bundle",
-            callback=_save_callback,
-            directory_selector=False,
-            default_filename=f"{current.name}.kodex",
-            modal=True,
-            width=500,
-            height=400,
+        path = filedialog.asksaveasfilename(
+            parent=self._window,
+            title="Export Bundle",
+            defaultextension=".kodex",
+            initialfile=f"{current.name}.kodex",
+            filetypes=[("Kodex bundle", "*.kodex"), ("All files", "*.*")],
         )
+        if path:
+            count = export_bundle(self.db, current.name, path)
+            messagebox.showinfo(
+                "Kodex", f"Exported {count} hotstrings to:\n{path}", parent=self._window
+            )
 
     def _import_bundle(self) -> None:
-        """Import bundle from file."""
         from kodex_py.storage.bundle_io import import_bundle
 
-        def _open_callback(sender, app_data):
-            if app_data and "file_path_name" in app_data:
-                path = app_data["file_path_name"]
-                if path:
-                    count = import_bundle(self.db, path)
-                    self._show_warning(f"Imported {count} hotstrings")
-                    self._rebuild_tabs()
-                    if self._on_reload:
-                        self._on_reload()
-
-        dpg.add_file_dialog(
-            label="Import Bundle",
-            callback=_open_callback,
-            directory_selector=False,
-            modal=True,
-            width=500,
-            height=400,
+        path = filedialog.askopenfilename(
+            parent=self._window,
+            title="Import Bundle",
+            filetypes=[("Kodex bundle", "*.kodex"), ("All files", "*.*")],
         )
+        if path:
+            count = import_bundle(self.db, path)
+            messagebox.showinfo(
+                "Kodex", f"Imported {count} hotstrings.", parent=self._window
+            )
+            self._rebuild_tabs()
+            if self._on_reload:
+                self._on_reload()
 
-    # ── Tools ──
+    # ── Tools ───────────────────────────────────────────────────────
 
     def _open_preferences(self) -> None:
-        """Open preferences window."""
         from kodex_py.gui.preferences import PreferencesWindow
 
-        prefs = PreferencesWindow(self.db)
-        prefs.show()
+        PreferencesWindow(self.db, parent=self._window).show()
 
     def _generate_cheatsheet(self) -> None:
-        """Generate cheatsheet to file."""
         from kodex_py.gui.cheatsheet import generate_cheatsheet
 
-        def _save_callback(sender, app_data):
-            if app_data and "file_path_name" in app_data:
-                path = app_data["file_path_name"]
-                if path:
-                    generate_cheatsheet(self.db, path)
-                    self._show_warning(f"Cheatsheet saved to {path}")
-
-        dpg.add_file_dialog(
-            label="Save Cheatsheet",
-            callback=_save_callback,
-            directory_selector=False,
-            default_filename="kodex-cheatsheet.html",
-            modal=True,
-            width=500,
-            height=400,
+        path = filedialog.asksaveasfilename(
+            parent=self._window,
+            title="Save Cheatsheet",
+            defaultextension=".html",
+            initialfile="kodex-cheatsheet.html",
+            filetypes=[("HTML files", "*.html"), ("All files", "*.*")],
         )
-
-    # ── Dialog helpers ──
-
-    def _show_warning(self, message: str) -> None:
-        """Show a warning/info popup."""
-        warn_tag = f"mgr_warn_{id(self)}_{hash(message)}"
-
-        def _close():
-            if dpg.does_item_exist(warn_tag):
-                dpg.delete_item(warn_tag)
-
-        with dpg.window(
-            label="Kodex",
-            tag=warn_tag,
-            modal=True,
-            no_close=True,
-            width=350,
-            height=100,
-            pos=[300, 200],
-        ):
-            dpg.add_text(message)
-            dpg.add_spacer(height=12)
-            dpg.add_button(label="OK", callback=_close, width=60)
-
-    def _show_confirm(self, message: str, on_yes: Callable) -> None:
-        """Show a yes/no confirmation dialog."""
-        confirm_tag = f"mgr_confirm_{id(self)}"
-
-        def _on_yes():
-            if dpg.does_item_exist(confirm_tag):
-                dpg.delete_item(confirm_tag)
-            on_yes()
-
-        def _on_no():
-            if dpg.does_item_exist(confirm_tag):
-                dpg.delete_item(confirm_tag)
-
-        with dpg.window(
-            label="Kodex",
-            tag=confirm_tag,
-            modal=True,
-            no_close=True,
-            width=350,
-            height=100,
-            pos=[300, 200],
-        ):
-            dpg.add_text(message)
-            dpg.add_spacer(height=12)
-            with dpg.group(horizontal=True):
-                dpg.add_button(label="No", callback=_on_no, width=60)
-                dpg.add_spacer(width=8)
-                dpg.add_button(label="Yes", callback=_on_yes, width=60)
-
-    def _show_input(
-        self, prompt: str, on_submit: Callable[[str], None], default: str = ""
-    ) -> None:
-        """Show an input dialog."""
-        input_tag = f"mgr_input_{id(self)}"
-        text_tag = f"mgr_input_text_{id(self)}"
-
-        def _on_ok():
-            value = dpg.get_value(text_tag)
-            if dpg.does_item_exist(input_tag):
-                dpg.delete_item(input_tag)
-            on_submit(value)
-
-        def _on_cancel():
-            if dpg.does_item_exist(input_tag):
-                dpg.delete_item(input_tag)
-
-        with dpg.window(
-            label="Kodex",
-            tag=input_tag,
-            modal=True,
-            no_close=True,
-            width=350,
-            height=120,
-            pos=[300, 200],
-        ):
-            dpg.add_text(prompt)
-            dpg.add_input_text(tag=text_tag, default_value=default, width=-1)
-            dpg.add_spacer(height=12)
-            with dpg.group(horizontal=True):
-                dpg.add_button(label="Cancel", callback=_on_cancel, width=60)
-                dpg.add_spacer(width=8)
-                dpg.add_button(label="OK", callback=_on_ok, width=60)
-
-        dpg.focus_item(text_tag)
+        if path:
+            generate_cheatsheet(self.db, path)
+            messagebox.showinfo(
+                "Kodex", f"Cheatsheet saved to:\n{path}", parent=self._window
+            )
