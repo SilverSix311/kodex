@@ -8,8 +8,9 @@ Protocol:
 
 On each message received from the extension:
   1. Parse the JSON context payload
-  2. Write/merge it to ~/.kodex/freshdesk_context.json
-  3. Respond with {"success": true} or {"success": false, "error": "..."}
+  2. Write/update {source}_context.json for that source
+  3. Update time_tracking.json
+  4. Respond with {"success": true} or {"success": false, "error": "..."}
 
 Usage (not normally called directly — Chrome launches via native_host.bat):
   python -m kodex_py.native_messaging
@@ -37,7 +38,7 @@ def _get_data_dir() -> Path:
         if portable_data.exists() or not home_data.exists():
             portable_data.mkdir(parents=True, exist_ok=True)
             return portable_data
-    
+
     # Fall back to home directory
     data_dir = Path.home() / ".kodex"
     data_dir.mkdir(parents=True, exist_ok=True)
@@ -54,69 +55,169 @@ logging.basicConfig(
 )
 log = logging.getLogger("kodex.native_messaging")
 
-# ── Context file ───────────────────────────────────────────────────────────────
+# ── Known sources ──────────────────────────────────────────────────────────────
 
-CONTEXT_FILE = _DATA_DIR / "freshdesk_context.json"
+KNOWN_SOURCES = ("freshdesk", "csr", "gt3")
 
+TIME_TRACKING_FILE = _DATA_DIR / "time_tracking.json"
+
+
+def _context_file(source: str) -> Path:
+    """Return the context file path for a given source."""
+    return _DATA_DIR / f"{source}_context.json"
+
+
+# ── Context writing ────────────────────────────────────────────────────────────
 
 def _write_context(payload: dict) -> None:
-    """Write the incoming context payload to disk.
+    """Write the incoming context payload to {source}_context.json.
 
-    Structure:
-      - Top-level keys from the latest source (for easy %variable% access)
-      - Prefixed keys for source-specific access (e.g., %freshdesk_ticket_number%)
-      - _sources dict with full data per source
-      - _active_source to know which source populated the top-level keys
+    Each source file is a flat dict with no nesting or cross-source prefixes.
+    An ``_updated_at`` timestamp is injected automatically.
     """
-    # Load existing data if present
-    existing: dict = {}
-    if CONTEXT_FILE.exists():
-        try:
-            existing = json.loads(CONTEXT_FILE.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError) as e:
-            log.warning("Could not read existing context file: %s", e)
-
     source = payload.get("source", "unknown")
     now = datetime.now().isoformat()
 
-    # Ensure _sources dict exists
-    if "_sources" not in existing:
-        existing["_sources"] = {}
-
-    # Store full payload under source key in _sources
-    existing["_sources"][source] = {
-        **payload,
-        "_saved_at": now,
+    # Build flat context — drop internal underscore keys from the payload so we
+    # only store clean fields, then add our own metadata.
+    context: dict = {
+        key: value
+        for key, value in payload.items()
+        if not key.startswith("_")
     }
+    context["_updated_at"] = now
 
-    # Clear old top-level keys (except metadata and _sources)
-    keys_to_remove = [k for k in existing.keys() if not k.startswith("_")]
-    for k in keys_to_remove:
-        del existing[k]
-
-    # Flatten latest source data to top level (for %ticket_number% etc.)
-    for key, value in payload.items():
-        if not key.startswith("_"):
-            existing[key] = value
-
-    # Also add prefixed keys for all sources (for %freshdesk_ticket_number% etc.)
-    for src, src_data in existing["_sources"].items():
-        for key, value in src_data.items():
-            if not key.startswith("_"):
-                existing[f"{src}_{key}"] = value
-
-    existing["_active_source"] = source
-    existing["_updated_at"] = now
-
-    # Atomic write via temp file
-    tmp = CONTEXT_FILE.with_suffix(".json.tmp")
+    context_file = _context_file(source)
+    tmp = context_file.with_suffix(".json.tmp")
     try:
-        tmp.write_text(json.dumps(existing, indent=2, ensure_ascii=False), encoding="utf-8")
-        tmp.replace(CONTEXT_FILE)
-        log.info("Context written to %s (source=%s, ticket=%s)", CONTEXT_FILE, source, payload.get("ticket_number"))
+        tmp.write_text(json.dumps(context, indent=2, ensure_ascii=False), encoding="utf-8")
+        tmp.replace(context_file)
+        log.info(
+            "Context written to %s (source=%s, ticket=%s)",
+            context_file, source, payload.get("ticket_number"),
+        )
     except OSError as e:
         log.error("Failed to write context file: %s", e)
         raise
+
+
+# ── Time tracking ──────────────────────────────────────────────────────────────
+
+def _load_time_tracking() -> dict:
+    """Load time_tracking.json, returning an empty structure if absent/corrupt."""
+    if TIME_TRACKING_FILE.exists():
+        try:
+            return json.loads(TIME_TRACKING_FILE.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError) as e:
+            log.warning("Could not read time_tracking.json: %s", e)
+    return {"tickets": {}, "_active": None}
+
+
+def _save_time_tracking(data: dict) -> None:
+    """Atomically write time_tracking.json."""
+    tmp = TIME_TRACKING_FILE.with_suffix(".json.tmp")
+    try:
+        tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+        tmp.replace(TIME_TRACKING_FILE)
+        log.debug("Time tracking written to %s", TIME_TRACKING_FILE)
+    except OSError as e:
+        log.error("Failed to write time_tracking.json: %s", e)
+        raise
+
+
+def _update_time_tracking(payload: dict) -> None:
+    """Update time_tracking.json based on incoming context payload.
+
+    Logic:
+    - If there's a currently active ticket, accumulate elapsed seconds.
+    - If the same ticket is still active, update last_seen but keep started_at.
+    - If a new ticket (or no ticket) arrives, finalize the old entry and set new _active.
+    """
+    data = _load_time_tracking()
+    now_str = datetime.now().isoformat()
+    now_dt = datetime.now()
+
+    source = payload.get("source", "unknown")
+    incoming_ticket = payload.get("ticket_number")  # May be None
+
+    active = data.get("_active")  # None or dict
+
+    # ── Finalize the previously active ticket (if any) ─────────────────────────
+    if active:
+        prev_ticket = active.get("ticket_number")
+        prev_source = active.get("source", "unknown")
+        started_at_str = active.get("started_at")
+
+        if prev_ticket and started_at_str:
+            try:
+                started_at_dt = datetime.fromisoformat(started_at_str)
+                elapsed = (now_dt - started_at_dt).total_seconds()
+            except (ValueError, TypeError):
+                elapsed = 0.0
+
+            same_ticket = (
+                incoming_ticket is not None
+                and incoming_ticket == prev_ticket
+                and source == prev_source
+            )
+
+            if same_ticket:
+                # Same ticket still open — do NOT reset started_at; just update last_seen.
+                ticket_entry = data["tickets"].setdefault(prev_ticket, {
+                    "total_seconds": 0,
+                    "source": prev_source,
+                    "last_seen": now_str,
+                })
+                # Add only the elapsed portion up to now, then restart the clock
+                # so the next update doesn't double-count.
+                ticket_entry["total_seconds"] = ticket_entry.get("total_seconds", 0) + elapsed
+                ticket_entry["last_seen"] = now_str
+                # Reset started_at to now so we don't double-count on next update.
+                active["started_at"] = now_str
+                data["_active"] = active
+
+                log.debug(
+                    "Same ticket %s still active; accumulated %.1fs (total=%.1fs)",
+                    prev_ticket, elapsed, ticket_entry["total_seconds"],
+                )
+
+                _save_time_tracking(data)
+                return  # Nothing more to do
+
+            else:
+                # Different ticket (or ticket cleared) — finalize previous entry.
+                ticket_entry = data["tickets"].setdefault(prev_ticket, {
+                    "total_seconds": 0,
+                    "source": prev_source,
+                    "last_seen": now_str,
+                })
+                ticket_entry["total_seconds"] = ticket_entry.get("total_seconds", 0) + elapsed
+                ticket_entry["last_seen"] = now_str
+                log.info(
+                    "Finalized ticket %s (source=%s): added %.1fs, total=%.1fs",
+                    prev_ticket, prev_source, elapsed, ticket_entry["total_seconds"],
+                )
+
+    # ── Set the new active ticket ──────────────────────────────────────────────
+    if incoming_ticket:
+        # Ensure an entry exists in tickets
+        data["tickets"].setdefault(incoming_ticket, {
+            "total_seconds": 0,
+            "source": source,
+            "last_seen": now_str,
+        })
+        data["_active"] = {
+            "ticket_number": incoming_ticket,
+            "source": source,
+            "started_at": now_str,
+        }
+        log.info("Active ticket set: %s (source=%s)", incoming_ticket, source)
+    else:
+        # No ticket in this payload — clear active.
+        data["_active"] = None
+        log.debug("No ticket_number in payload; active cleared.")
+
+    _save_time_tracking(data)
 
 
 # ── Native messaging I/O ───────────────────────────────────────────────────────
@@ -172,7 +273,7 @@ def run() -> None:
     Exits cleanly when Chrome closes the pipe.
     """
     log.info("Kodex native messaging host started (PID %d)", os.getpid())
-    log.info("Context file: %s", CONTEXT_FILE)
+    log.info("Data directory: %s", _DATA_DIR)
 
     # Use raw binary I/O — critical for native messaging protocol correctness.
     # DO NOT wrap in TextIOWrapper; the 4-byte length prefix is binary.
@@ -205,12 +306,13 @@ def run() -> None:
             log.info("Processing context: source=%s ticket=%s", source, ticket)
 
             _write_context(message)
+            _update_time_tracking(message)
 
             _write_message(stdout, {
                 "success": True,
                 "source": source,
                 "ticket_number": ticket,
-                "written_to": str(CONTEXT_FILE),
+                "written_to": str(_context_file(source)),
             })
 
         except Exception as e:
