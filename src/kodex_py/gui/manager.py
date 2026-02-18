@@ -107,6 +107,8 @@ class ManagementWindow:
         tools_menu = tk.Menu(menubar, **_m_kw)
         tools_menu.add_command(label="Preferences…", command=self._open_preferences)
         tools_menu.add_command(label="Printable Cheatsheet", command=self._generate_cheatsheet)
+        tools_menu.add_separator()
+        tools_menu.add_command(label="View Variables…", command=self._view_variables)
         menubar.add_cascade(label="Tools", menu=tools_menu)
 
         bundles_menu = tk.Menu(menubar, **_m_kw)
@@ -548,3 +550,295 @@ class ManagementWindow:
             messagebox.showinfo(
                 "Kodex", f"Cheatsheet saved to:\n{path}", parent=self._window
             )
+
+    def _view_variables(self) -> None:
+        ViewVariablesDialog(parent=self._window).show()
+
+
+# ── View Variables Dialog ────────────────────────────────────────────────────
+
+class ViewVariablesDialog:
+    """Read-only dialog that shows all available Kodex variables.
+
+    Sections:
+      1. Built-in variables  (%c, %t, %tl, %ds, %dl, %p, %|)
+      2. Ticket Context      (freshdesk_context.json)
+      3. Global Variables    (global_variables.json)
+    """
+
+    _BUILTIN_VARS: list[tuple[str, str]] = [
+        ("%c",  "Clipboard contents"),
+        ("%t",  "Short time (e.g., 2:30 PM)"),
+        ("%tl", "Long time (e.g., 14:30:45 PM)"),
+        ("%ds", "Short date (e.g., 1/29/2026)"),
+        ("%dl", "Long date (e.g., January 29, 2026)"),
+        ("%p",  "Prompt — asks user for input"),
+        ("%|",  "Cursor position after expansion"),
+    ]
+
+    # Colours reused from parent module
+    _ROW_EVEN   = ("gray92", "gray18")
+    _ROW_ODD    = ("gray88", "gray22")
+    _VAR_COLOR  = ("#1a7ccf", "#4da6ff")
+    _DIM_COLOR  = ("gray50", "gray55")
+
+    def __init__(self, parent=None) -> None:
+        self._parent = parent
+        self._window: ctk.CTkToplevel | None = None
+        self._scroll: ctk.CTkScrollableFrame | None = None
+        self._status_label: ctk.CTkLabel | None = None
+        self._row_index: int = 0          # used to alternate row colours
+
+    # ── Public ───────────────────────────────────────────────────────
+
+    def show(self) -> None:
+        if self._window is not None and self._window.winfo_exists():
+            self._window.deiconify()
+            self._window.lift()
+            self._window.focus_force()
+            return
+        self._build()
+
+    # ── Construction ─────────────────────────────────────────────────
+
+    def _build(self) -> None:
+        win = ctk.CTkToplevel(self._parent)
+        self._window = win
+        win.title("Kodex — View Variables")
+        win.geometry("740x580")
+        win.minsize(520, 380)
+
+        # ── Top button bar ──
+        btn_bar = ctk.CTkFrame(win, fg_color="transparent")
+        btn_bar.pack(fill="x", padx=12, pady=(10, 4))
+
+        ctk.CTkButton(
+            btn_bar, text="⟳  Refresh", width=100, command=self._refresh
+        ).pack(side="left")
+
+        self._status_label = ctk.CTkLabel(
+            btn_bar, text="", text_color=self._DIM_COLOR
+        )
+        self._status_label.pack(side="left", padx=(12, 0))
+
+        hint = ctk.CTkLabel(
+            btn_bar,
+            text="Right-click or click 📋 to copy a variable name",
+            text_color=self._DIM_COLOR,
+            font=ctk.CTkFont(size=11),
+        )
+        hint.pack(side="right")
+
+        # ── Divider ──
+        ctk.CTkFrame(win, height=1, fg_color=("gray75", "gray30")).pack(
+            fill="x", padx=12, pady=(0, 4)
+        )
+
+        # ── Scrollable body ──
+        self._scroll = ctk.CTkScrollableFrame(win)
+        self._scroll.pack(fill="both", expand=True, padx=12, pady=(0, 12))
+
+        self._populate()
+
+    # ── Content builder ──────────────────────────────────────────────
+
+    def _populate(self) -> None:
+        """Clear and rebuild all variable rows."""
+        if self._scroll is None:
+            return
+
+        for child in self._scroll.winfo_children():
+            child.destroy()
+
+        self._row_index = 0
+
+        # 1 ─ Built-in variables
+        self._add_section("Built-in Variables")
+        for var_name, description in self._BUILTIN_VARS:
+            self._add_row(var_name, description, copy_text=var_name)
+
+        # 2 ─ Ticket Context
+        self._add_spacer()
+        self._add_section("Ticket Context  (freshdesk_context.json)")
+
+        ctx: dict = {}
+        try:
+            from kodex_py.utils.global_variables import get_global_variables
+            ctx = get_global_variables().get_freshdesk_context()
+        except Exception as exc:
+            log.warning("ViewVariablesDialog: could not load freshdesk context: %s", exc)
+
+        if ctx:
+            active_source = ctx.get("_active_source")
+            if active_source is not None:
+                self._add_meta_row("Active source", str(active_source))
+
+            self._row_index = 0  # reset alternation for this section
+            for key, value in sorted(ctx.items()):
+                self._add_row(
+                    f"%{key}%",
+                    self._fmt(value),
+                    copy_text=f"%{key}%",
+                )
+        else:
+            self._add_empty("No ticket context loaded  (freshdesk_context.json not found)")
+
+        # 3 ─ Global Variables
+        self._add_spacer()
+        self._add_section("Global Variables  (global_variables.json)")
+
+        gv_vars: dict = {}
+        try:
+            from kodex_py.utils.global_variables import get_global_variables
+            gv_vars = get_global_variables().list_all()
+        except Exception as exc:
+            log.warning("ViewVariablesDialog: could not load global variables: %s", exc)
+
+        if gv_vars:
+            self._row_index = 0
+            for name, info in sorted(gv_vars.items()):
+                var_type = info.get("type", "string")
+                raw_val  = info.get("value", "")
+                display  = f"[{var_type}]  {self._fmt(raw_val)}"
+                self._add_row(f"%{name}%", display, copy_text=f"%{name}%")
+        else:
+            self._add_empty("No global variables defined")
+
+    # ── Row helpers ──────────────────────────────────────────────────
+
+    def _add_section(self, title: str) -> None:
+        ctk.CTkLabel(
+            self._scroll,
+            text=title,
+            font=ctk.CTkFont(size=13, weight="bold"),
+            anchor="w",
+        ).pack(fill="x", padx=6, pady=(8, 2))
+        ctk.CTkFrame(
+            self._scroll, height=1, fg_color=("gray70", "gray38")
+        ).pack(fill="x", padx=6, pady=(0, 2))
+
+    def _add_row(self, var_name: str, value: str, copy_text: str) -> None:
+        """One variable row: [name] [value …] [📋]"""
+        bg = self._ROW_EVEN if self._row_index % 2 == 0 else self._ROW_ODD
+        self._row_index += 1
+
+        row = ctk.CTkFrame(self._scroll, fg_color=bg, corner_radius=4)
+        row.pack(fill="x", padx=6, pady=2)
+        row.columnconfigure(1, weight=1)
+
+        # Variable name (monospace, coloured)
+        name_lbl = ctk.CTkLabel(
+            row,
+            text=var_name,
+            font=ctk.CTkFont(family="Courier New", size=12),
+            text_color=self._VAR_COLOR,
+            anchor="w",
+            width=160,
+        )
+        name_lbl.grid(row=0, column=0, padx=(10, 6), pady=6, sticky="w")
+
+        # Value (truncated if very long)
+        truncated = value if len(value) <= 90 else value[:87] + "…"
+        val_lbl = ctk.CTkLabel(
+            row,
+            text=truncated,
+            font=ctk.CTkFont(size=12),
+            anchor="w",
+        )
+        val_lbl.grid(row=0, column=1, padx=(0, 6), pady=6, sticky="ew")
+
+        # Copy button
+        copy_btn = ctk.CTkButton(
+            row,
+            text="📋",
+            width=34,
+            height=26,
+            font=ctk.CTkFont(size=12),
+            command=lambda t=copy_text: self._copy(t),
+        )
+        copy_btn.grid(row=0, column=2, padx=(0, 8), pady=4)
+
+        # Right-click → context menu
+        def _ctx_menu(event: tk.Event, t: str = copy_text) -> None:
+            m = tk.Menu(
+                self._scroll, tearoff=0,
+                bg="#2b2b2b", fg="#dce4ee",
+                activebackground="#1f6aa5", activeforeground="white",
+            )
+            m.add_command(label=f"Copy  {t}", command=lambda: self._copy(t))
+            m.tk_popup(event.x_root, event.y_root)
+
+        for w in (row, name_lbl, val_lbl):
+            w.bind("<Button-3>", _ctx_menu)
+
+    def _add_meta_row(self, label: str, value: str) -> None:
+        """Small informational sub-row (e.g., active source)."""
+        row = ctk.CTkFrame(self._scroll, fg_color="transparent")
+        row.pack(fill="x", padx=6, pady=(0, 2))
+        ctk.CTkLabel(
+            row,
+            text=f"  {label}:",
+            font=ctk.CTkFont(size=11),
+            text_color=self._DIM_COLOR,
+            anchor="w",
+            width=130,
+        ).pack(side="left")
+        ctk.CTkLabel(
+            row,
+            text=value,
+            font=ctk.CTkFont(size=11),
+            text_color=self._DIM_COLOR,
+            anchor="w",
+        ).pack(side="left", padx=(4, 0))
+
+    def _add_empty(self, text: str) -> None:
+        ctk.CTkLabel(
+            self._scroll,
+            text=f"  {text}",
+            text_color=self._DIM_COLOR,
+            font=ctk.CTkFont(size=12, slant="italic"),
+            anchor="w",
+        ).pack(fill="x", padx=6, pady=6)
+
+    def _add_spacer(self) -> None:
+        ctk.CTkFrame(self._scroll, height=8, fg_color="transparent").pack()
+
+    # ── Actions ──────────────────────────────────────────────────────
+
+    def _copy(self, text: str) -> None:
+        if self._window and self._window.winfo_exists():
+            self._window.clipboard_clear()
+            self._window.clipboard_append(text)
+            if self._status_label:
+                self._status_label.configure(text=f"Copied: {text}")
+                self._window.after(
+                    2000, lambda: self._status_label.configure(text="")
+                )
+
+    def _refresh(self) -> None:
+        try:
+            from kodex_py.utils.global_variables import get_global_variables
+            get_global_variables().load()
+        except Exception as exc:
+            log.warning("ViewVariablesDialog: refresh load failed: %s", exc)
+        self._populate()
+        if self._status_label:
+            self._status_label.configure(text="Refreshed ✓")
+            if self._window:
+                self._window.after(
+                    2000, lambda: self._status_label.configure(text="")
+                )
+
+    # ── Utility ──────────────────────────────────────────────────────
+
+    @staticmethod
+    def _fmt(value: object) -> str:
+        """Convert any variable value to a display string."""
+        import json as _json
+        if value is None:
+            return "(none)"
+        if isinstance(value, bool):
+            return "true" if value else "false"
+        if isinstance(value, (dict, list)):
+            return _json.dumps(value, ensure_ascii=False)
+        return str(value)
