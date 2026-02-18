@@ -50,6 +50,7 @@ DEPENDENCIES = [
     "Pillow>=10.0.0",
     "pyperclip>=1.8.2",
     "click>=8.1.0",
+    "dearpygui>=2.0.0",
 ]
 
 
