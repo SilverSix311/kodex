@@ -25,23 +25,38 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-# ── Logging (to file only — stdout is reserved for the native messaging protocol) ──
+# ── Determine data directory (portable vs installed mode) ──
 
-_LOG_DIR = Path.home() / ".kodex"
-_LOG_DIR.mkdir(parents=True, exist_ok=True)
+def _get_data_dir() -> Path:
+    """Get the Kodex data directory, respecting portable mode."""
+    kodex_root = os.environ.get("KODEX_ROOT")
+    if kodex_root:
+        portable_data = Path(kodex_root) / "data"
+        # Use portable location if it exists OR if there's no home config yet
+        home_data = Path.home() / ".kodex"
+        if portable_data.exists() or not home_data.exists():
+            portable_data.mkdir(parents=True, exist_ok=True)
+            return portable_data
+    
+    # Fall back to home directory
+    data_dir = Path.home() / ".kodex"
+    data_dir.mkdir(parents=True, exist_ok=True)
+    return data_dir
+
+_DATA_DIR = _get_data_dir()
 
 logging.basicConfig(
     level=logging.DEBUG,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     handlers=[
-        logging.FileHandler(_LOG_DIR / "native_messaging.log", encoding="utf-8"),
+        logging.FileHandler(_DATA_DIR / "native_messaging.log", encoding="utf-8"),
     ],
 )
 log = logging.getLogger("kodex.native_messaging")
 
 # ── Context file ───────────────────────────────────────────────────────────────
 
-CONTEXT_FILE = _LOG_DIR / "freshdesk_context.json"
+CONTEXT_FILE = _DATA_DIR / "freshdesk_context.json"
 
 
 def _write_context(payload: dict) -> None:

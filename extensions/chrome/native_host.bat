@@ -44,6 +44,9 @@ REM ── Launch the native messaging host ────────────
 REM Native messaging requires stdin/stdout to be in binary mode (no BOM, no CR).
 REM Python handles this internally via sys.stdin.buffer / sys.stdout.buffer.
 
+REM Export KODEX_ROOT so native_messaging.py can find the data folder
+set "KODEX_ROOT=%KODEX_ROOT%"
+
 "%PYTHON_EXE%" -m kodex_py.native_messaging
 
 endlocal
