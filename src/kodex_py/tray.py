@@ -52,16 +52,12 @@ def run_tray(app: "KodexApp") -> None:
 
     # ── Initialize Dear PyGui ──
     dpg.create_context()
-    dpg.create_viewport(title="Kodex", width=100, height=100)
-
-    # Hide the main viewport (we only show windows on demand)
-    dpg.set_viewport_decorated(False)
+    dpg.create_viewport(title="Kodex", width=900, height=600, min_width=600, min_height=400)
 
     dpg.setup_dearpygui()
     dpg.show_viewport()
 
-    # Minimize/hide viewport - we're tray-only by default
-    # On Windows, we want the viewport to exist but be hidden
+    # Start minimized - we're tray-only by default
     dpg.minimize_viewport()
 
     # GUI window instances (lazy-created)
@@ -96,8 +92,6 @@ def run_tray(app: "KodexApp") -> None:
                     app.db, on_reload=app.reload_hotstrings
                 )
             _management_window[0].show()
-            # Restore viewport when showing a window
-            dpg.maximize_viewport()
 
         _schedule(_do)
 
@@ -105,8 +99,6 @@ def run_tray(app: "KodexApp") -> None:
         def _do():
             from kodex_py.gui.editor import NewHotstringDialog
 
-            # Restore viewport when showing a window
-            dpg.maximize_viewport()
             dialog = NewHotstringDialog(app.db)
             dialog.show()
             app.reload_hotstrings()
@@ -117,8 +109,6 @@ def run_tray(app: "KodexApp") -> None:
         def _do():
             from kodex_py.gui.preferences import PreferencesWindow
 
-            # Restore viewport when showing a window
-            dpg.maximize_viewport()
             prefs = PreferencesWindow(app.db)
             prefs.show()
 
