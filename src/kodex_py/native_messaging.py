@@ -47,8 +47,11 @@ CONTEXT_FILE = _LOG_DIR / "freshdesk_context.json"
 def _write_context(payload: dict) -> None:
     """Write the incoming context payload to disk.
 
-    The file always contains the *most recent* context per source.
-    Multiple sources (freshdesk, csr, gt3) are stored under separate keys.
+    Structure:
+      - Top-level keys from the latest source (for easy %variable% access)
+      - Prefixed keys for source-specific access (e.g., %freshdesk_ticket_number%)
+      - _sources dict with full data per source
+      - _active_source to know which source populated the top-level keys
     """
     # Load existing data if present
     existing: dict = {}
@@ -59,14 +62,36 @@ def _write_context(payload: dict) -> None:
             log.warning("Could not read existing context file: %s", e)
 
     source = payload.get("source", "unknown")
+    now = datetime.now().isoformat()
 
-    # Store the full payload under its source key + a flat "latest" key
-    existing[source] = {
+    # Ensure _sources dict exists
+    if "_sources" not in existing:
+        existing["_sources"] = {}
+
+    # Store full payload under source key in _sources
+    existing["_sources"][source] = {
         **payload,
-        "_saved_at": datetime.now().isoformat(),
+        "_saved_at": now,
     }
-    existing["_latest"] = existing[source]
-    existing["_updated_at"] = datetime.now().isoformat()
+
+    # Clear old top-level keys (except metadata and _sources)
+    keys_to_remove = [k for k in existing.keys() if not k.startswith("_")]
+    for k in keys_to_remove:
+        del existing[k]
+
+    # Flatten latest source data to top level (for %ticket_number% etc.)
+    for key, value in payload.items():
+        if not key.startswith("_"):
+            existing[key] = value
+
+    # Also add prefixed keys for all sources (for %freshdesk_ticket_number% etc.)
+    for src, src_data in existing["_sources"].items():
+        for key, value in src_data.items():
+            if not key.startswith("_"):
+                existing[f"{src}_{key}"] = value
+
+    existing["_active_source"] = source
+    existing["_updated_at"] = now
 
     # Atomic write via temp file
     tmp = CONTEXT_FILE.with_suffix(".json.tmp")
