@@ -19,7 +19,23 @@ DEFAULT_DB_NAME = "kodex.db"
 
 
 def get_data_dir() -> Path:
-    """Return (and create) the Kodex data directory."""
+    """Return (and create) the Kodex data directory.
+    
+    Portable mode: If KODEX_ROOT env var is set and contains a 'data' folder,
+    use that. Otherwise fall back to ~/.kodex/
+    """
+    import os
+    
+    # Check for portable mode (KODEX_ROOT set by launcher)
+    kodex_root = os.environ.get("KODEX_ROOT")
+    if kodex_root:
+        portable_data = Path(kodex_root) / "data"
+        # Use portable location if it exists OR if there's no home config yet
+        if portable_data.exists() or not DEFAULT_DATA_DIR.exists():
+            portable_data.mkdir(parents=True, exist_ok=True)
+            return portable_data
+    
+    # Fall back to home directory
     d = DEFAULT_DATA_DIR
     d.mkdir(parents=True, exist_ok=True)
     return d
