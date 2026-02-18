@@ -408,6 +408,23 @@ def main():
     if resources_src.exists():
         shutil.copytree(resources_src, DIST_DIR / "data" / "resources")
 
+    # 6b. Copy Chrome extension
+    extensions_src = Path("extensions")
+    if extensions_src.exists():
+        extensions_dst = DIST_DIR / "extensions"
+        print(f"\n->> Copying Chrome extension to {extensions_dst}...")
+        if extensions_dst.exists():
+            shutil.rmtree(extensions_dst)
+        shutil.copytree(extensions_src, extensions_dst)
+        print("  Extension files copied.")
+
+        # Update the native_host.bat path separator for Windows portability
+        native_launcher = extensions_dst / "chrome" / "native_host.bat"
+        if native_launcher.exists():
+            print(f"  native_host.bat present: {native_launcher}")
+    else:
+        print("\n->> No extensions/ folder found, skipping Chrome extension copy.")
+
     # 7. Create data directory
     data_dir = DIST_DIR / "data"
     data_dir.mkdir(exist_ok=True)

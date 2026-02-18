@@ -1,0 +1,9 @@
+{
+  "name": "com.kodex.context",
+  "description": "Kodex Context Bridge — receives ticket context from the Chrome extension",
+  "path": "native_host.bat",
+  "type": "stdio",
+  "allowed_origins": [
+    "chrome-extension://EXTENSION_ID_PLACEHOLDER/"
+  ]
+}

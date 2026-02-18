@@ -1,0 +1,51 @@
+{
+  "manifest_version": 3,
+  "name": "Kodex Context Bridge",
+  "version": "1.0.0",
+  "description": "Captures ticket context from Freshdesk, CSR, and GT3 and forwards it to Kodex via native messaging.",
+
+  "permissions": [
+    "activeTab",
+    "nativeMessaging"
+  ],
+
+  "background": {
+    "service_worker": "background.js"
+  },
+
+  "content_scripts": [
+    {
+      "matches": ["*://*.freshdesk.com/*"],
+      "js": ["content_freshdesk.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["*://csr.lindenlab.com/*"],
+      "js": ["content_csr.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["*://gt3.lindenlab.com/*"],
+      "js": ["content_gt3.js"],
+      "run_at": "document_idle"
+    }
+  ],
+
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Kodex Context Bridge",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  }
+}
