@@ -154,5 +154,27 @@
     }
   }, 500);
 
+  // ── Send context when tab gains focus ────────────────────────────────────
+  // This ensures switching between tickets updates the context immediately
+
+  function forceSend() {
+    lastSentTicket = null; // Reset so we always send
+    maybeSend();
+  }
+
+  // Tab becomes visible (user switches to this tab)
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") {
+      console.log("[Kodex/Freshdesk] Tab became visible, refreshing context");
+      setTimeout(forceSend, 100);
+    }
+  });
+
+  // Window gains focus (user clicks into browser from another app)
+  window.addEventListener("focus", () => {
+    console.log("[Kodex/Freshdesk] Window focused, refreshing context");
+    setTimeout(forceSend, 100);
+  });
+
   console.log("[Kodex/Freshdesk] Content script loaded on", window.location.href);
 })();

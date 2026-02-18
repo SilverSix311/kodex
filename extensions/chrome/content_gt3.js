@@ -141,5 +141,24 @@
     }
   }, 500);
 
+  // ── Send context when tab gains focus ────────────────────────────────────
+
+  function forceSend() {
+    lastSentUrl = null;
+    maybeSend();
+  }
+
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") {
+      console.log("[Kodex/GT3] Tab became visible, refreshing context");
+      setTimeout(forceSend, 100);
+    }
+  });
+
+  window.addEventListener("focus", () => {
+    console.log("[Kodex/GT3] Window focused, refreshing context");
+    setTimeout(forceSend, 100);
+  });
+
   console.log("[Kodex/GT3] Content script loaded on", window.location.href);
 })();
