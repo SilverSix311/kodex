@@ -10,66 +10,119 @@ import logging
 
 log = logging.getLogger(__name__)
 
+# Result storage for the modal dialog
+_prompt_result: str | None = None
+
 
 def show_prompt(template: str, parent=None) -> str | None:
     """Show a prompt dialog for the %p variable.
 
     Returns the user's input, or None if cancelled.
+
+    Note: This creates a temporary viewport if Dear PyGui isn't already running.
+    When called from an existing DPG context, it creates a modal window.
     """
-    import tkinter as tk
-    from tkinter import ttk
+    import dearpygui.dearpygui as dpg
 
-    result = [None]
+    global _prompt_result
+    _prompt_result = None
 
-    dialog = tk.Toplevel(parent)
-    dialog.title("Kodex — Fill In")
-    dialog.geometry("400x250")
-    dialog.resizable(False, False)
-    dialog.attributes("-topmost", True)
-    if parent:
-        dialog.transient(parent)
-    dialog.grab_set()
+    # Check if DPG context exists
+    dpg_running = False
+    try:
+        dpg_running = dpg.is_dearpygui_running()
+    except Exception:
+        pass
 
-    frame = ttk.Frame(dialog, padding=12)
-    frame.pack(fill=tk.BOTH, expand=True)
+    dialog_tag = "prompt_dialog"
+    input_tag = "prompt_input"
 
-    ttk.Label(frame, text="Template:").pack(anchor=tk.W)
-    template_display = tk.Text(frame, height=5, wrap=tk.WORD, state=tk.DISABLED,
-                                font=("Consolas", 9))
-    template_display.pack(fill=tk.X, pady=(0, 8))
-    template_display.config(state=tk.NORMAL)
-    template_display.insert("1.0", template)
-    # Highlight %p
-    start = "1.0"
-    while True:
-        pos = template_display.search("%p", start, stopindex=tk.END)
-        if not pos:
-            break
-        end_pos = f"{pos}+2c"
-        template_display.tag_add("highlight", pos, end_pos)
-        start = end_pos
-    template_display.tag_config("highlight", background="#FFD700", foreground="#000")
-    template_display.config(state=tk.DISABLED)
+    def _on_ok():
+        global _prompt_result
+        _prompt_result = dpg.get_value(input_tag)
+        dpg.delete_item(dialog_tag)
+        if not dpg_running:
+            dpg.stop_dearpygui()
 
-    ttk.Label(frame, text="Fill in:").pack(anchor=tk.W)
-    input_var = tk.StringVar()
-    entry = ttk.Entry(frame, textvariable=input_var, width=40)
-    entry.pack(fill=tk.X, pady=(0, 8))
-    entry.focus_set()
+    def _on_cancel():
+        global _prompt_result
+        _prompt_result = None
+        dpg.delete_item(dialog_tag)
+        if not dpg_running:
+            dpg.stop_dearpygui()
 
-    btn_frame = ttk.Frame(frame)
-    btn_frame.pack(fill=tk.X)
+    def _on_key_press(sender, app_data):
+        if app_data == dpg.mvKey_Return:
+            _on_ok()
+        elif app_data == dpg.mvKey_Escape:
+            _on_cancel()
 
-    def on_ok(*_):
-        result[0] = input_var.get()
-        dialog.destroy()
+    def _build_dialog():
+        # Highlight %p in template for display
+        display_template = template.replace("%p", "[%p]")
 
-    def on_cancel():
-        dialog.destroy()
+        with dpg.window(
+            label="Kodex — Fill In",
+            tag=dialog_tag,
+            modal=True,
+            no_close=True,
+            width=420,
+            height=280,
+            pos=[100, 100],
+        ):
+            dpg.add_text("Template:")
+            dpg.add_input_text(
+                default_value=display_template,
+                multiline=True,
+                readonly=True,
+                height=80,
+                width=-1,
+            )
 
-    entry.bind("<Return>", on_ok)
-    ttk.Button(btn_frame, text="OK", command=on_ok).pack(side=tk.RIGHT, padx=(4, 0))
-    ttk.Button(btn_frame, text="Cancel", command=on_cancel).pack(side=tk.RIGHT)
+            dpg.add_spacer(height=8)
+            dpg.add_text("Fill in:")
+            dpg.add_input_text(
+                tag=input_tag,
+                width=-1,
+                on_enter=True,
+                callback=lambda: _on_ok(),
+            )
 
-    dialog.wait_window()
-    return result[0]
+            dpg.add_spacer(height=12)
+            with dpg.group(horizontal=True):
+                dpg.add_button(label="Cancel", callback=_on_cancel, width=80)
+                dpg.add_button(label="OK", callback=_on_ok, width=80)
+
+        # Focus the input
+        dpg.focus_item(input_tag)
+
+        # Key handler for enter/escape
+        with dpg.handler_registry(tag="prompt_key_handler"):
+            dpg.add_key_press_handler(callback=_on_key_press)
+
+    if dpg_running:
+        # Already running — just add modal window
+        _build_dialog()
+        # Wait for dialog to close (busy-wait since we're in existing loop)
+        while dpg.does_item_exist(dialog_tag):
+            pass
+    else:
+        # Create temporary context
+        dpg.create_context()
+        dpg.create_viewport(title="Kodex — Fill In", width=440, height=300, always_on_top=True)
+        dpg.setup_dearpygui()
+
+        _build_dialog()
+
+        dpg.show_viewport()
+        dpg.start_dearpygui()
+        dpg.destroy_context()
+
+    # Cleanup key handler if it exists
+    try:
+        if dpg.does_item_exist("prompt_key_handler"):
+            dpg.delete_item("prompt_key_handler")
+    except Exception:
+        pass
+
+    return _prompt_result

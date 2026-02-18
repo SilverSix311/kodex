@@ -8,6 +8,7 @@ Tokens (evaluated at expansion time):
     %tl  — long time    (e.g. "14:30:45 PM")
     %p   — user prompt  (caller must supply the value)
     %|   — cursor position marker (handled by the executor, not here)
+    %name% — global/ticket variable (see global_variables.py)
 """
 
 from __future__ import annotations
@@ -32,6 +33,9 @@ def substitute(
 
     ``%|`` is **not** stripped here — the executor needs to see it to
     calculate cursor offset.
+
+    Global/ticket variables (``%var_name%``) are also substituted.
+    Priority: freshdesk_context > global_variables
     """
     now = now or datetime.now()
 
@@ -63,7 +67,21 @@ def substitute(
     if "%p" in text and prompt_value is not None:
         text = text.replace("%p", prompt_value)
 
+    # Global/ticket variables (%var_name%)
+    # Must be after built-in tokens to avoid conflicts
+    text = _substitute_global_variables(text)
+
     return text
+
+
+def _substitute_global_variables(text: str) -> str:
+    """Substitute global and ticket variables in text."""
+    try:
+        from kodex_py.utils.global_variables import substitute_global_variables
+        return substitute_global_variables(text)
+    except Exception:
+        # If global variables module fails, return text as-is
+        return text
 
 
 # ── platform-aware formatters ───────────────────────────────────────

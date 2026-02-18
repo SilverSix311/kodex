@@ -1,7 +1,8 @@
 """Preferences window — mirrors AHK preferences_GUI.ahk.
 
-Three tabs:
+Four tabs:
 - General: hotkeys, send mode, sound, startup
+- Variables: global variable management
 - Print: cheatsheet generation
 - Stats: expansion statistics
 """
@@ -18,7 +19,7 @@ log = logging.getLogger(__name__)
 
 
 class PreferencesWindow:
-    """Preferences dialog with General / Print / Stats tabs."""
+    """Preferences dialog with General / Variables / Print / Stats tabs."""
 
     def __init__(self, db: "Database", parent=None) -> None:
         self.db = db
@@ -36,8 +37,8 @@ class PreferencesWindow:
 
         self._dialog = tk.Toplevel(self._parent)
         self._dialog.title("Kodex — Preferences")
-        self._dialog.geometry("480x400")
-        self._dialog.resizable(False, False)
+        self._dialog.geometry("700x550")
+        self._dialog.resizable(True, True)
         self._dialog.transient(self._parent)
         self._dialog.grab_set()
 
@@ -87,6 +88,17 @@ class PreferencesWindow:
         ttk.Checkbutton(general, text="Play sound on expansion", variable=sound_var).pack(anchor=tk.W)
         ttk.Checkbutton(general, text="Run at Windows startup", variable=startup_var).pack(anchor=tk.W)
         ttk.Checkbutton(general, text="Enable autocorrect", variable=autocorrect_var).pack(anchor=tk.W)
+
+        # ── Variables tab ──
+        try:
+            from kodex_py.gui.global_variables import GlobalVariablesPane
+            variables_pane = GlobalVariablesPane(notebook)
+            notebook.add(variables_pane.frame, text="Variables")
+        except Exception as e:
+            log.warning("Failed to create Variables tab: %s", e)
+            variables_tab = ttk.Frame(notebook, padding=12)
+            notebook.add(variables_tab, text="Variables")
+            ttk.Label(variables_tab, text=f"Variables tab failed to load:\n{e}").pack(pady=20)
 
         # ── Print tab ──
         print_tab = ttk.Frame(notebook, padding=12)

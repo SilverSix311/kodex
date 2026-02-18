@@ -34,6 +34,7 @@ class KodexApp:
         self.matcher = HotstringMatcher(case_sensitive=True)
         self._input_monitor = None
         self.tracker = None  # TicketTracker instance
+        self.global_vars = None  # GlobalVariables instance
 
     # ── lifecycle ───────────────────────────────────────────────────
 
@@ -75,6 +76,16 @@ class KodexApp:
         except Exception:
             log.warning("Failed to initialise ticket tracker", exc_info=True)
 
+        # Global variables
+        try:
+            from kodex_py.utils.global_variables import get_global_variables
+            self.global_vars = get_global_variables(self.db_path.parent)
+            self.global_vars.start_watching(self._on_variables_changed)
+            log.info("Global variables initialised — %d variables loaded", 
+                     len(self.global_vars.list_all()))
+        except Exception:
+            log.warning("Failed to initialise global variables", exc_info=True)
+
         # Input monitor
         from kodex_py.engine.input_monitor import InputMonitor
         self._input_monitor = InputMonitor(self.matcher, self._on_match)
@@ -92,6 +103,8 @@ class KodexApp:
             self._input_monitor._kb_listener.join()
 
     def stop(self) -> None:
+        if self.global_vars:
+            self.global_vars.stop_watching()
         if self.tracker and self.tracker.is_tracking:
             self.tracker.stop()
         if self._input_monitor:
@@ -162,6 +175,11 @@ class KodexApp:
         assert self.db is not None
         self.db.increment_stat("expanded", 1)
         self.db.increment_stat("chars_saved", chars)
+
+    def _on_variables_changed(self) -> None:
+        """Called when global_variables.json or freshdesk_context.json changes."""
+        log.debug("Global variables or freshdesk context updated")
+        # Variables are loaded automatically by the watcher, no need to reload matcher
 
     # ── toggle ──────────────────────────────────────────────────────
 

@@ -65,6 +65,8 @@ class ManagementWindow:
 
         tools_menu = tk.Menu(menubar, tearoff=0)
         tools_menu.add_command(label="Preferences...", command=self._open_preferences)
+        tools_menu.add_command(label="Global Variables...", command=self._open_global_variables)
+        tools_menu.add_separator()
         tools_menu.add_command(label="Printable Cheatsheet", command=self._generate_cheatsheet)
         menubar.add_cascade(label="Tools", menu=tools_menu)
 
@@ -407,6 +409,11 @@ class ManagementWindow:
         from kodex_py.gui.preferences import PreferencesWindow
         prefs = PreferencesWindow(self.db, parent=self._root)
         prefs.show()
+
+    def _open_global_variables(self) -> None:
+        from kodex_py.gui.global_variables import GlobalVariablesWindow
+        gv_win = GlobalVariablesWindow(parent=self._root)
+        gv_win.show()
 
     def _generate_cheatsheet(self) -> None:
         from tkinter import filedialog, messagebox
