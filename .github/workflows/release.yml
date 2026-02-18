@@ -9,8 +9,25 @@ permissions:
   contents: write  # Needed to create releases
 
 jobs:
+  notify-start:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Discord — Build Started
+        env:
+          WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: |
+          if [ -z "$WEBHOOK_URL" ]; then exit 0; fi
+          
+          VERSION="${{ github.ref_name }}"
+          RUN_URL="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          
+          curl -sf -X POST "$WEBHOOK_URL" \
+            -H "Content-Type: application/json" \
+            -d "{\"embeds\": [{\"title\": \"🔨 Kodex ${VERSION} — Build Started\", \"url\": \"${RUN_URL}\", \"description\": \"Building release...\", \"color\": 16776960, \"footer\": {\"text\": \"Kodex CI\"}, \"timestamp\": \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}]}"
+
   build:
     runs-on: windows-latest
+    needs: [notify-start]
     
     steps:
       - name: Checkout code
@@ -55,34 +72,52 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  notify:
+  notify-done:
     runs-on: ubuntu-latest
     needs: [build]
-    if: success()
+    if: always()
     steps:
-      - name: Discord notification
+      - name: Discord — Build Complete
         env:
           WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          BUILD_STATUS: ${{ needs.build.result }}
         run: |
           if [ -z "$WEBHOOK_URL" ]; then exit 0; fi
           
           VERSION="${{ github.ref_name }}"
           RELEASE_URL="https://github.com/${{ github.repository }}/releases/tag/${VERSION}"
           DOWNLOAD_URL="https://github.com/${{ github.repository }}/releases/download/${VERSION}/kodex-${VERSION}-windows.zip"
+          RUN_URL="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
           
-          PAYLOAD=$(cat <<EOF
+          if [ "$BUILD_STATUS" = "success" ]; then
+            PAYLOAD=$(cat <<EOF
           {
             "embeds": [{
-              "title": "🚀 Kodex ${VERSION} Released!",
+              "title": "✅ Kodex ${VERSION} — Build Complete!",
               "url": "${RELEASE_URL}",
-              "description": "A new version of Kodex is available.\n\n[**Download kodex-${VERSION}-windows.zip**](${DOWNLOAD_URL})",
-              "color": 5793266,
-              "footer": {"text": "Kodex Release"},
+              "description": "Release is ready!\n\n[**⬇️ Download kodex-${VERSION}-windows.zip**](${DOWNLOAD_URL})",
+              "color": 5763719,
+              "footer": {"text": "Kodex CI"},
               "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
             }]
           }
           EOF
-          )
+            )
+          else
+            PAYLOAD=$(cat <<EOF
+          {
+            "embeds": [{
+              "title": "❌ Kodex ${VERSION} — Build Failed",
+              "url": "${RUN_URL}",
+              "description": "Build failed. Check the [workflow run](${RUN_URL}) for details.",
+              "color": 15158332,
+              "footer": {"text": "Kodex CI"},
+              "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            }]
+          }
+          EOF
+            )
+          fi
           
           curl -sf -X POST "$WEBHOOK_URL" \
             -H "Content-Type: application/json" \
