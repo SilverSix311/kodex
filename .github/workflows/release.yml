@@ -34,10 +34,11 @@ jobs:
       - name: Build embedded distribution
         run: python build_embedded.py
       
-      - name: Build launcher exe
+      - name: Build launcher executables
         run: |
           cd launcher
           go build -ldflags "-H windowsgui -s -w" -o ../dist/kodex/Kodex.exe kodex.go
+          go build -ldflags "-s -w" -o ../dist/kodex/Kodex-Debug.exe kodex.go
       
       - name: Create release zip
         run: |
