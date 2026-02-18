@@ -94,7 +94,9 @@ func main() {
 	log("✓ kodex_py module found")
 
 	// Build command
-	cmd := exec.Command(pythonExe, "-m", "kodex_py.app")
+	// -m kodex_py runs __main__.py which calls cli()
+	// We pass "run" to start the engine + tray
+	cmd := exec.Command(pythonExe, "-m", "kodex_py", "run")
 	cmd.Dir = dir
 
 	// Set environment
@@ -108,7 +110,7 @@ func main() {
 
 	log("PYTHONPATH=%s", appDir)
 	log("KODEX_ROOT=%s", dir)
-	log("Command: %s -m kodex_py.app", pythonExe)
+	log("Command: %s -m kodex_py run", pythonExe)
 
 	if debug {
 		// In debug mode, show Python's output
