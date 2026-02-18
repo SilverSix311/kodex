@@ -1,4 +1,4 @@
-"""System tray icon and menu — powered by pystray.
+"""System tray icon and menu — powered by pystray with Dear PyGui GUI.
 
 Fully connected to the GUI and ticket tracker:
     • Manage hotstrings  → opens ManagementWindow
@@ -8,87 +8,124 @@ Fully connected to the GUI and ticket tracker:
     • Disable / Enable
     • About
     • Exit
+
+Threading model:
+  - Main thread: Dear PyGui render loop (required for responsive GUI)
+  - Background thread: pystray icon
 """
 
 from __future__ import annotations
 
 import logging
-import sys
 import threading
 from typing import TYPE_CHECKING
+
+import dearpygui.dearpygui as dpg
 
 if TYPE_CHECKING:
     from kodex_py.app import KodexApp
 
 log = logging.getLogger(__name__)
 
-# tkinter root — runs on the MAIN thread
-_tk_root = None
+# Global flag for shutdown coordination
+_shutdown_requested = False
 
 
 def _create_icon():
     """Create a simple fallback icon (64×64 green square) if no .ico is available."""
     from PIL import Image
+
     return Image.new("RGB", (64, 64), color=(34, 139, 34))
 
 
 def run_tray(app: "KodexApp") -> None:
-    """Build and run the system-tray icon with tkinter GUI support.
+    """Build and run the system-tray icon with Dear PyGui GUI support.
 
     Threading model:
-      - Main thread: tkinter mainloop (required for responsive GUI on Windows)
+      - Main thread: Dear PyGui render loop (required for responsive GUI on Windows)
       - Background thread: pystray icon
     """
     import pystray
 
-    global _tk_root
+    global _shutdown_requested
+    _shutdown_requested = False
 
-    # ── Try to create hidden tkinter root on main thread ──
-    # Embedded Python may not have tkinter DLLs — tray works without it,
-    # GUI popup windows (manage, preferences) won't.
-    try:
-        import tkinter as tk
-        _tk_root = tk.Tk()
-        _tk_root.withdraw()
-    except ImportError:
-        log.warning("tkinter not available — tray will work but GUI popups disabled")
-        _tk_root = None
+    # ── Initialize Dear PyGui ──
+    dpg.create_context()
+    dpg.create_viewport(title="Kodex", width=100, height=100)
+
+    # Hide the main viewport (we only show windows on demand)
+    dpg.set_viewport_decorated(False)
+
+    dpg.setup_dearpygui()
+    dpg.show_viewport()
+
+    # Minimize/hide viewport - we're tray-only by default
+    # On Windows, we want the viewport to exist but be hidden
+    dpg.minimize_viewport()
 
     # GUI window instances (lazy-created)
     _management_window = [None]
 
+    # Thread-safe queue for GUI actions
+    _gui_actions = []
+    _gui_lock = threading.Lock()
+
     def _schedule(fn):
-        """Schedule a function to run on the tkinter main thread."""
-        if _tk_root is not None:
-            _tk_root.after(0, fn)
+        """Schedule a function to run on the Dear PyGui main thread."""
+        with _gui_lock:
+            _gui_actions.append(fn)
+
+    def _process_scheduled():
+        """Process any scheduled GUI actions (called from main loop)."""
+        with _gui_lock:
+            actions = _gui_actions.copy()
+            _gui_actions.clear()
+        for fn in actions:
+            try:
+                fn()
+            except Exception as e:
+                log.error("Error in scheduled GUI action: %s", e)
 
     def on_manage(icon, item):
         def _do():
             from kodex_py.gui.manager import ManagementWindow
+
             if _management_window[0] is None:
                 _management_window[0] = ManagementWindow(
                     app.db, on_reload=app.reload_hotstrings
                 )
             _management_window[0].show()
+            # Restore viewport when showing a window
+            dpg.maximize_viewport()
+
         _schedule(_do)
 
     def on_new_hotstring(icon, item):
         def _do():
             from kodex_py.gui.editor import NewHotstringDialog
-            dialog = NewHotstringDialog(app.db, parent=_tk_root)
+
+            # Restore viewport when showing a window
+            dpg.maximize_viewport()
+            dialog = NewHotstringDialog(app.db)
             dialog.show()
             app.reload_hotstrings()
+
         _schedule(_do)
 
     def on_preferences(icon, item):
         def _do():
             from kodex_py.gui.preferences import PreferencesWindow
-            prefs = PreferencesWindow(app.db, parent=_tk_root)
+
+            # Restore viewport when showing a window
+            dpg.maximize_viewport()
+            prefs = PreferencesWindow(app.db)
             prefs.show()
+
         _schedule(_do)
 
     def on_tracker(icon, item):
-        if hasattr(app, 'tracker') and app.tracker is not None:
+        if hasattr(app, "tracker") and app.tracker is not None:
             msg = app.tracker.toggle()
             log.info("Tracker: %s", msg)
 
@@ -97,19 +134,18 @@ def run_tray(app: "KodexApp") -> None:
         log.info("Kodex %s", "disabled" if app.disabled else "enabled")
 
     def on_exit(icon, item):
-        if hasattr(app, 'tracker') and app.tracker is not None and app.tracker.is_tracking:
+        global _shutdown_requested
+        if hasattr(app, "tracker") and app.tracker is not None and app.tracker.is_tracking:
             app.tracker.stop()
         app.stop()
         icon.stop()
-        # Quit tkinter mainloop from the main thread
-        if _tk_root is not None:
-            _schedule(lambda: _tk_root.quit())
+        _shutdown_requested = True
 
     def _disable_text(item):
         return "Enable" if app.disabled else "Disable"
 
     def _tracker_text(item):
-        if hasattr(app, 'tracker') and app.tracker is not None and app.tracker.is_tracking:
+        if hasattr(app, "tracker") and app.tracker is not None and app.tracker.is_tracking:
             return f"Stop Tracker (#{app.tracker.ticket_number})"
         return "Start Ticket Tracker"
 
@@ -118,6 +154,7 @@ def run_tray(app: "KodexApp") -> None:
     # Try to load a real icon
     try:
         from PIL import Image
+
         ico_path = app.db_path.parent / "resources" / "kodex.ico"
         if ico_path.exists():
             icon_image = Image.open(str(ico_path))
@@ -140,12 +177,15 @@ def run_tray(app: "KodexApp") -> None:
 
     icon = pystray.Icon("kodex", icon_image, "Kodex", menu)
 
-    # Run pystray in a background thread, tkinter mainloop on main thread
+    # Run pystray in a background thread
     tray_thread = threading.Thread(target=icon.run, daemon=True, name="pystray")
     tray_thread.start()
 
-    # Block on tkinter mainloop (main thread) or pystray thread if no tkinter
-    if _tk_root is not None:
-        _tk_root.mainloop()
-    else:
-        tray_thread.join()
+    # ── Main Dear PyGui render loop ──
+    while dpg.is_dearpygui_running() and not _shutdown_requested:
+        # Process scheduled GUI actions from other threads
+        _process_scheduled()
+        dpg.render_dearpygui_frame()
+
+    # Cleanup
+    dpg.destroy_context()

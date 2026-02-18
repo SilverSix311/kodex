@@ -1,8 +1,7 @@
 """Preferences window — mirrors AHK preferences_GUI.ahk.
 
-Four tabs:
+Three tabs:
 - General: hotkeys, send mode, sound, startup
-- Variables: global variable management
 - Print: cheatsheet generation
 - Stats: expansion statistics
 """
@@ -12,6 +11,8 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
+import dearpygui.dearpygui as dpg
+
 if TYPE_CHECKING:
     from kodex_py.storage.database import Database
 
@@ -19,150 +20,237 @@ log = logging.getLogger(__name__)
 
 
 class PreferencesWindow:
-    """Preferences dialog with General / Variables / Print / Stats tabs."""
+    """Preferences dialog with General / Print / Stats tabs."""
 
     def __init__(self, db: "Database", parent=None) -> None:
         self.db = db
         self._parent = parent
-        self._dialog = None
+        self._dialog_tag = "preferences_dialog"
+        self._closed = False
 
     def show(self) -> None:
-        import tkinter as tk
-        from tkinter import ttk
-
         from kodex_py.config import load_config, save_config
-        from kodex_py.storage.models import AppConfig, SendMode
+        from kodex_py.storage.models import SendMode
 
         cfg = load_config(self.db)
 
-        self._dialog = tk.Toplevel(self._parent)
-        self._dialog.title("Kodex — Preferences")
-        self._dialog.geometry("700x550")
-        self._dialog.resizable(True, True)
-        self._dialog.transient(self._parent)
-        self._dialog.grab_set()
+        # Generate unique tags
+        dialog_id = id(self)
+        hk_create_tag = f"pref_hk_create_{dialog_id}"
+        hk_manage_tag = f"pref_hk_manage_{dialog_id}"
+        hk_disable_tag = f"pref_hk_disable_{dialog_id}"
+        hk_tracker_tag = f"pref_hk_tracker_{dialog_id}"
+        mode_tag = f"pref_mode_{dialog_id}"
+        sound_tag = f"pref_sound_{dialog_id}"
+        startup_tag = f"pref_startup_{dialog_id}"
+        autocorrect_tag = f"pref_autocorrect_{dialog_id}"
 
-        notebook = ttk.Notebook(self._dialog)
-        notebook.pack(fill=tk.BOTH, expand=True, padx=8, pady=8)
+        def _on_save():
+            cfg.hotkey_create = dpg.get_value(hk_create_tag)
+            cfg.hotkey_manage = dpg.get_value(hk_manage_tag)
+            cfg.hotkey_disable = dpg.get_value(hk_disable_tag)
+            cfg.hotkey_tracker = dpg.get_value(hk_tracker_tag)
 
-        # ── General tab ──
-        general = ttk.Frame(notebook, padding=12)
-        notebook.add(general, text="General")
+            mode_val = dpg.get_value(mode_tag)
+            cfg.send_mode = SendMode.CLIPBOARD if mode_val == "Clipboard" else SendMode.DIRECT
 
-        # Hotkeys
-        hk_frame = ttk.LabelFrame(general, text="Hotkeys")
-        hk_frame.pack(fill=tk.X, pady=(0, 8))
+            cfg.play_sound = dpg.get_value(sound_tag)
+            cfg.run_at_startup = dpg.get_value(startup_tag)
+            cfg.autocorrect_enabled = dpg.get_value(autocorrect_tag)
 
-        hotkey_create_var = tk.StringVar(value=cfg.hotkey_create)
-        hotkey_manage_var = tk.StringVar(value=cfg.hotkey_manage)
-        hotkey_disable_var = tk.StringVar(value=cfg.hotkey_disable)
-        hotkey_tracker_var = tk.StringVar(value=cfg.hotkey_tracker)
+            save_config(self.db, cfg)
+            self._close_dialog()
 
-        for label, var in [
-            ("Create hotstring:", hotkey_create_var),
-            ("Manage hotstrings:", hotkey_manage_var),
-            ("Disable toggle:", hotkey_disable_var),
-            ("Ticket tracker:", hotkey_tracker_var),
-        ]:
-            row = ttk.Frame(hk_frame)
-            row.pack(fill=tk.X, pady=2)
-            ttk.Label(row, text=label, width=20).pack(side=tk.LEFT)
-            ttk.Entry(row, textvariable=var, width=20).pack(side=tk.LEFT, padx=4)
-
-        # Send mode
-        mode_frame = ttk.LabelFrame(general, text="Send Mode")
-        mode_frame.pack(fill=tk.X, pady=(0, 8))
-        mode_var = tk.IntVar(value=cfg.send_mode.value)
-        ttk.Radiobutton(mode_frame, text="Direct (keystroke injection)", variable=mode_var, value=0).pack(
-            anchor=tk.W, padx=8
-        )
-        ttk.Radiobutton(mode_frame, text="Clipboard (Ctrl+V paste)", variable=mode_var, value=1).pack(
-            anchor=tk.W, padx=8
-        )
-
-        # Checkboxes
-        sound_var = tk.BooleanVar(value=cfg.play_sound)
-        startup_var = tk.BooleanVar(value=cfg.run_at_startup)
-        autocorrect_var = tk.BooleanVar(value=cfg.autocorrect_enabled)
-
-        ttk.Checkbutton(general, text="Play sound on expansion", variable=sound_var).pack(anchor=tk.W)
-        ttk.Checkbutton(general, text="Run at Windows startup", variable=startup_var).pack(anchor=tk.W)
-        ttk.Checkbutton(general, text="Enable autocorrect", variable=autocorrect_var).pack(anchor=tk.W)
-
-        # ── Variables tab ──
-        try:
-            from kodex_py.gui.global_variables import GlobalVariablesPane
-            variables_pane = GlobalVariablesPane(notebook)
-            notebook.add(variables_pane.frame, text="Variables")
-        except Exception as e:
-            log.warning("Failed to create Variables tab: %s", e)
-            variables_tab = ttk.Frame(notebook, padding=12)
-            notebook.add(variables_tab, text="Variables")
-            ttk.Label(variables_tab, text=f"Variables tab failed to load:\n{e}").pack(pady=20)
-
-        # ── Print tab ──
-        print_tab = ttk.Frame(notebook, padding=12)
-        notebook.add(print_tab, text="Print")
-
-        ttk.Label(print_tab, text="Generate a printable HTML cheatsheet\nof all your hotstrings.").pack(
-            pady=20
-        )
+        def _on_cancel():
+            self._close_dialog()
 
         def _do_cheatsheet():
-            from tkinter import filedialog, messagebox
             from kodex_py.gui.cheatsheet import generate_cheatsheet
 
-            path = filedialog.asksaveasfilename(
-                parent=self._dialog,
-                defaultextension=".html",
-                filetypes=[("HTML", "*.html")],
-                initialfile="kodex-cheatsheet.html",
+            # Use file dialog
+            def _save_callback(sender, app_data):
+                if app_data and "file_path_name" in app_data:
+                    path = app_data["file_path_name"]
+                    if path:
+                        generate_cheatsheet(self.db, path)
+                        self._show_info(f"Cheatsheet saved to {path}")
+
+            dpg.add_file_dialog(
+                label="Save Cheatsheet",
+                callback=_save_callback,
+                directory_selector=False,
+                default_filename="kodex-cheatsheet.html",
+                modal=True,
+                width=500,
+                height=400,
             )
-            if path:
-                generate_cheatsheet(self.db, path)
-                messagebox.showinfo("Kodex", f"Cheatsheet saved to {path}", parent=self._dialog)
 
-        ttk.Button(print_tab, text="Generate Cheatsheet", command=_do_cheatsheet).pack()
-
-        # ── Stats tab ──
-        stats_tab = ttk.Frame(notebook, padding=12)
-        notebook.add(stats_tab, text="Stats")
-
+        # Stats data
         expanded = self.db.get_stat("expanded")
         chars = self.db.get_stat("chars_saved")
         hours = chars / 24_000 if chars else 0
         total_hs = len(self.db.get_hotstrings())
         total_bundles = len(self.db.get_bundles())
 
-        for label, value in [
-            ("Hotstrings:", str(total_hs)),
-            ("Bundles:", str(total_bundles)),
-            ("Expansions:", f"{expanded:,}"),
-            ("Characters saved:", f"{chars:,}"),
-            ("Hours saved:", f"{hours:.1f}"),
-        ]:
-            row = ttk.Frame(stats_tab)
-            row.pack(fill=tk.X, pady=2)
-            ttk.Label(row, text=label, width=20, anchor=tk.E).pack(side=tk.LEFT)
-            ttk.Label(row, text=value, font=("Segoe UI", 11, "bold")).pack(side=tk.LEFT, padx=8)
+        # Build dialog
+        with dpg.window(
+            label="Kodex — Preferences",
+            tag=self._dialog_tag,
+            modal=True,
+            no_close=True,
+            width=500,
+            height=440,
+            pos=[200, 100],
+        ):
+            with dpg.tab_bar():
+                # ── General Tab ──
+                with dpg.tab(label="General"):
+                    dpg.add_spacer(height=8)
 
-        # ── Buttons ──
-        btn_frame = ttk.Frame(self._dialog)
-        btn_frame.pack(fill=tk.X, padx=8, pady=(0, 8))
+                    # Hotkeys section
+                    with dpg.collapsing_header(label="Hotkeys", default_open=True):
+                        with dpg.group():
+                            with dpg.group(horizontal=True):
+                                dpg.add_text("Create hotstring:", bullet=False)
+                                dpg.add_spacer(width=20)
+                                dpg.add_input_text(
+                                    tag=hk_create_tag,
+                                    default_value=cfg.hotkey_create,
+                                    width=150,
+                                )
 
-        def on_save():
-            cfg.hotkey_create = hotkey_create_var.get()
-            cfg.hotkey_manage = hotkey_manage_var.get()
-            cfg.hotkey_disable = hotkey_disable_var.get()
-            cfg.hotkey_tracker = hotkey_tracker_var.get()
-            cfg.send_mode = SendMode(mode_var.get())
-            cfg.play_sound = sound_var.get()
-            cfg.run_at_startup = startup_var.get()
-            cfg.autocorrect_enabled = autocorrect_var.get()
-            save_config(self.db, cfg)
-            self._dialog.destroy()
+                            with dpg.group(horizontal=True):
+                                dpg.add_text("Manage hotstrings:")
+                                dpg.add_spacer(width=8)
+                                dpg.add_input_text(
+                                    tag=hk_manage_tag,
+                                    default_value=cfg.hotkey_manage,
+                                    width=150,
+                                )
 
-        ttk.Button(btn_frame, text="Save", command=on_save).pack(side=tk.RIGHT, padx=(4, 0))
-        ttk.Button(btn_frame, text="Cancel", command=self._dialog.destroy).pack(side=tk.RIGHT)
+                            with dpg.group(horizontal=True):
+                                dpg.add_text("Disable toggle:")
+                                dpg.add_spacer(width=30)
+                                dpg.add_input_text(
+                                    tag=hk_disable_tag,
+                                    default_value=cfg.hotkey_disable,
+                                    width=150,
+                                )
 
-        self._dialog.wait_window()
+                            with dpg.group(horizontal=True):
+                                dpg.add_text("Ticket tracker:")
+                                dpg.add_spacer(width=30)
+                                dpg.add_input_text(
+                                    tag=hk_tracker_tag,
+                                    default_value=cfg.hotkey_tracker,
+                                    width=150,
+                                )
+
+                    dpg.add_spacer(height=8)
+
+                    # Send Mode section
+                    with dpg.collapsing_header(label="Send Mode", default_open=True):
+                        current_mode = "Clipboard" if cfg.send_mode == SendMode.CLIPBOARD else "Direct"
+                        dpg.add_combo(
+                            tag=mode_tag,
+                            items=["Direct", "Clipboard"],
+                            default_value=current_mode,
+                            width=200,
+                        )
+                        dpg.add_text(
+                            "Direct = keystroke injection\nClipboard = Ctrl+V paste",
+                            color=(150, 150, 150),
+                        )
+
+                    dpg.add_spacer(height=8)
+
+                    # Checkboxes
+                    dpg.add_checkbox(
+                        label="Play sound on expansion",
+                        tag=sound_tag,
+                        default_value=cfg.play_sound,
+                    )
+                    dpg.add_checkbox(
+                        label="Run at Windows startup",
+                        tag=startup_tag,
+                        default_value=cfg.run_at_startup,
+                    )
+                    dpg.add_checkbox(
+                        label="Enable autocorrect",
+                        tag=autocorrect_tag,
+                        default_value=cfg.autocorrect_enabled,
+                    )
+
+                # ── Print Tab ──
+                with dpg.tab(label="Print"):
+                    dpg.add_spacer(height=20)
+                    dpg.add_text("Generate a printable HTML cheatsheet")
+                    dpg.add_text("of all your hotstrings.")
+                    dpg.add_spacer(height=20)
+                    dpg.add_button(label="Generate Cheatsheet", callback=_do_cheatsheet)
+
+                # ── Stats Tab ──
+                with dpg.tab(label="Stats"):
+                    dpg.add_spacer(height=12)
+
+                    with dpg.table(header_row=False, borders_innerV=False, borders_outerH=False):
+                        dpg.add_table_column(width_fixed=True, init_width_or_weight=150)
+                        dpg.add_table_column()
+
+                        with dpg.table_row():
+                            dpg.add_text("Hotstrings:")
+                            dpg.add_text(str(total_hs), color=(100, 200, 255))
+
+                        with dpg.table_row():
+                            dpg.add_text("Bundles:")
+                            dpg.add_text(str(total_bundles), color=(100, 200, 255))
+
+                        with dpg.table_row():
+                            dpg.add_text("Expansions:")
+                            dpg.add_text(f"{expanded:,}", color=(100, 200, 255))
+
+                        with dpg.table_row():
+                            dpg.add_text("Characters saved:")
+                            dpg.add_text(f"{chars:,}", color=(100, 200, 255))
+
+                        with dpg.table_row():
+                            dpg.add_text("Hours saved:")
+                            dpg.add_text(f"{hours:.1f}", color=(100, 200, 255))
+
+            dpg.add_spacer(height=12)
+
+            # Buttons
+            with dpg.group(horizontal=True):
+                dpg.add_button(label="Cancel", callback=_on_cancel, width=80)
+                dpg.add_spacer(width=8)
+                dpg.add_button(label="Save", callback=_on_save, width=80)
+
+        # Wait for dialog to close
+        while dpg.does_item_exist(self._dialog_tag) and dpg.is_dearpygui_running():
+            dpg.render_dearpygui_frame()
+
+    def _close_dialog(self) -> None:
+        self._closed = True
+        if dpg.does_item_exist(self._dialog_tag):
+            dpg.delete_item(self._dialog_tag)
+
+    def _show_info(self, message: str) -> None:
+        """Show an info popup."""
+        info_tag = f"pref_info_{id(self)}"
+
+        def _close_info():
+            if dpg.does_item_exist(info_tag):
+                dpg.delete_item(info_tag)
+
+        with dpg.window(
+            label="Kodex",
+            tag=info_tag,
+            modal=True,
+            no_close=True,
+            width=350,
+            height=100,
+            pos=[300, 200],
+        ):
+            dpg.add_text(message)
+            dpg.add_spacer(height=12)
+            dpg.add_button(label="OK", callback=_close_info, width=60)
