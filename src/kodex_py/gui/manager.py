@@ -657,31 +657,47 @@ class ViewVariablesDialog:
         for var_name, description in self._BUILTIN_VARS:
             self._add_row(var_name, description, copy_text=var_name)
 
-        # 2 ─ Ticket Context
+        # 2 ─ Ticket Context (all sources)
         self._add_spacer()
-        self._add_section("Ticket Context  (freshdesk_context.json)")
+        self._add_section("Ticket Context  (per-source context files)")
 
-        ctx: dict = {}
+        all_contexts: dict = {}
         try:
             from kodex_py.utils.global_variables import get_global_variables
-            ctx = get_global_variables().get_freshdesk_context()
+            all_contexts = get_global_variables().get_all_contexts()
         except Exception as exc:
-            log.warning("ViewVariablesDialog: could not load freshdesk context: %s", exc)
+            log.warning("ViewVariablesDialog: could not load contexts: %s", exc)
 
-        if ctx:
-            active_source = ctx.get("_active_source")
-            if active_source is not None:
-                self._add_meta_row("Active source", str(active_source))
+        if all_contexts:
+            for source, ctx in sorted(all_contexts.items()):
+                if not ctx:
+                    continue
+                # Section header for each source
+                ctk.CTkLabel(
+                    self._scroll,
+                    text=f"  {source.upper()}  ({source}_context.json)",
+                    font=ctk.CTkFont(size=11),
+                    text_color=("gray50", "gray60"),
+                    anchor="w",
+                ).pack(fill="x", padx=10, pady=(6, 2))
 
-            self._row_index = 0  # reset alternation for this section
-            for key, value in sorted(ctx.items()):
-                self._add_row(
-                    f"%{key}%",
-                    self._fmt(value),
-                    copy_text=f"%{key}%",
-                )
+                self._row_index = 0  # reset alternation for this source
+                for key, value in sorted(ctx.items()):
+                    if key.startswith("_"):
+                        continue  # skip metadata
+                    self._add_row(
+                        f"%{key}%",
+                        self._fmt(value),
+                        copy_text=f"%{key}%",
+                    )
+                    # Also show prefixed version
+                    self._add_row(
+                        f"%{source}_{key}%",
+                        self._fmt(value),
+                        copy_text=f"%{source}_{key}%",
+                    )
         else:
-            self._add_empty("No ticket context loaded  (freshdesk_context.json not found)")
+            self._add_empty("No ticket context loaded  (no context files found)")
 
         # 3 ─ Global Variables
         self._add_spacer()
