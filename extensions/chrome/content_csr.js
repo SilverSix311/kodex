@@ -54,9 +54,9 @@
    * 
    * @param {string} labelText - Exact label to match (case-insensitive)
    * @param {boolean} exactMatch - If true, require exact match; if false, use startsWith
-   * @param {boolean} firstTextOnly - If true, return only the first text node (ignore links/buttons)
+   * @param {boolean} valueOnly - If true, get value from span (not links like Settle/Adjust)
    */
-  function getTableValue(labelText, exactMatch = true, firstTextOnly = false) {
+  function getTableValue(labelText, exactMatch = true, valueOnly = false) {
     const tables = document.querySelectorAll("table.data.side_by_side");
     const searchLabel = labelText.toLowerCase();
     
@@ -74,23 +74,21 @@
             : label.startsWith(searchLabel);
           
           if (matches) {
-            if (firstTextOnly) {
-              // Get only direct text content, not from child elements
-              // This handles cases like "0.00    Settle" where Settle is a link
-              const textNodes = [];
+            if (valueOnly) {
+              // Value is typically in a <span> element, not in links
+              // Structure: <td><span>VALUE</span> ... <a>Settle</a> <a>Adjust</a></td>
+              const span = td.querySelector("span");
+              if (span) {
+                const val = span.textContent.trim();
+                if (val) return val;
+              }
+              
+              // Fallback: get first text node (direct child)
               for (const node of td.childNodes) {
                 if (node.nodeType === Node.TEXT_NODE) {
                   const text = node.textContent.trim();
-                  if (text) textNodes.push(text);
+                  if (text && !text.startsWith("==")) return text;
                 }
-              }
-              if (textNodes.length > 0) {
-                return textNodes[0];
-              }
-              // Fallback to first child text if no direct text nodes
-              const firstChild = td.firstChild;
-              if (firstChild && firstChild.nodeType === Node.TEXT_NODE) {
-                return firstChild.textContent.trim();
               }
             }
             
