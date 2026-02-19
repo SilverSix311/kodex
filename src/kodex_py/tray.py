@@ -118,11 +118,38 @@ def run_tray(app: "KodexApp") -> None:
 
     def on_exit(icon, item) -> None:
         def _do():
-            if hasattr(app, "tracker") and app.tracker is not None and app.tracker.is_tracking:
-                app.tracker.stop()
-            app.stop()
-            icon.stop()
-            root.quit()
+            import os
+            import sys
+            
+            log.info("Exit requested — shutting down")
+            
+            try:
+                if hasattr(app, "tracker") and app.tracker is not None and app.tracker.is_tracking:
+                    app.tracker.stop()
+                app.stop()
+            except Exception as e:
+                log.warning("Error during app.stop(): %s", e)
+            
+            try:
+                icon.stop()
+            except Exception as e:
+                log.warning("Error stopping tray icon: %s", e)
+            
+            try:
+                root.quit()
+                root.destroy()
+            except Exception as e:
+                log.warning("Error destroying root window: %s", e)
+            
+            # Force exit after a short delay if threads don't stop cleanly
+            def _force_exit():
+                log.info("Force exiting process")
+                os._exit(0)
+            
+            # Give threads 1 second to clean up, then force exit
+            force_timer = threading.Timer(1.0, _force_exit)
+            force_timer.daemon = True
+            force_timer.start()
 
         _schedule(_do)
 

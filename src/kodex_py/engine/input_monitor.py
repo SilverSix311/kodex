@@ -81,8 +81,16 @@ class InputMonitor:
     def stop(self) -> None:
         if self._kb_listener:
             self._kb_listener.stop()
+            try:
+                self._kb_listener.join(timeout=0.5)
+            except Exception:
+                pass
         if self._mouse_listener:
             self._mouse_listener.stop()
+            try:
+                self._mouse_listener.join(timeout=0.5)
+            except Exception:
+                pass
         log.info("Input monitor stopped")
 
     @property
