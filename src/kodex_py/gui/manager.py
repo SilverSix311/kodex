@@ -31,6 +31,44 @@ _LIST_SELECT_BG = "#1f6aa5"
 _LIST_FONT = ("Helvetica", 12)
 
 
+def _set_window_icon(window, db: "Database" = None) -> None:
+    """Set the Kodex icon on a window (works for Tk, Toplevel, CTkToplevel).
+    
+    Tries to load from resources/kodex.ico relative to the database path,
+    falls back to the package resources directory.
+    """
+    from pathlib import Path
+    
+    icon_path = None
+    
+    # Try database-relative path first (for portable mode)
+    if db is not None:
+        try:
+            candidate = Path(db.db_path).parent / "resources" / "kodex.ico"
+            if candidate.exists():
+                icon_path = candidate
+        except Exception:
+            pass
+    
+    # Fallback: package resources
+    if icon_path is None:
+        try:
+            import kodex_py
+            pkg_dir = Path(kodex_py.__file__).parent.parent
+            candidate = pkg_dir / "resources" / "kodex.ico"
+            if candidate.exists():
+                icon_path = candidate
+        except Exception:
+            pass
+    
+    # Apply icon if found
+    if icon_path is not None:
+        try:
+            window.iconbitmap(str(icon_path))
+        except Exception as e:
+            log.debug("Could not set window icon: %s", e)
+
+
 class ManagementWindow:
     """Main hotstring management window."""
 
@@ -87,6 +125,9 @@ class ManagementWindow:
         win.title("Kodex — Manage Hotstrings")
         win.geometry("980x700")
         win.minsize(720, 520)
+        
+        # Set window icon
+        _set_window_icon(win, self.db)
 
         # ── Variables ──
         self._search_var = tk.StringVar()
@@ -607,6 +648,9 @@ class ViewVariablesDialog:
         win.title("Kodex — View Variables")
         win.geometry("740x580")
         win.minsize(520, 380)
+        
+        # Set window icon
+        _set_window_icon(win)
 
         # ── Top button bar ──
         btn_bar = ctk.CTkFrame(win, fg_color="transparent")

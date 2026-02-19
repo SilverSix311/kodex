@@ -41,6 +41,10 @@ class PreferencesWindow:
         win.grab_set()
         win.lift()
         win.focus_force()
+        
+        # Set window icon
+        from kodex_py.gui.manager import _set_window_icon
+        _set_window_icon(win, self.db)
 
         # ── Variables ──
         hk_create_var = tk.StringVar(value=cfg.hotkey_create)
