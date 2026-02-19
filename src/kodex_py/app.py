@@ -10,7 +10,9 @@ This is the main orchestrator that:
 
 from __future__ import annotations
 
+import atexit
 import logging
+import os
 import sys
 from pathlib import Path
 
@@ -22,6 +24,32 @@ from kodex_py.storage.database import Database
 from kodex_py.storage.models import SendMode, TriggerType
 
 log = logging.getLogger(__name__)
+
+# Global PID file path (set on startup)
+_pid_file: Path | None = None
+
+
+def _write_pid_file(path: Path) -> None:
+    """Write current PID to file."""
+    global _pid_file
+    _pid_file = path
+    try:
+        path.write_text(str(os.getpid()))
+        log.debug("PID file written: %s", path)
+    except OSError as e:
+        log.warning("Failed to write PID file: %s", e)
+
+
+def _remove_pid_file() -> None:
+    """Remove PID file on exit."""
+    global _pid_file
+    if _pid_file and _pid_file.exists():
+        try:
+            _pid_file.unlink()
+            log.debug("PID file removed: %s", _pid_file)
+        except OSError as e:
+            log.warning("Failed to remove PID file: %s", e)
+    _pid_file = None
 
 
 class KodexApp:
@@ -56,6 +84,11 @@ class KodexApp:
                 pass
 
         log.info("Kodex %s starting — db=%s", __version__, self.db_path)
+
+        # Write PID file so native messaging host knows we're running
+        pid_file = self.db_path.parent / "kodex.pid"
+        _write_pid_file(pid_file)
+        atexit.register(_remove_pid_file)
 
         # Database
         self.db = Database(self.db_path)
@@ -111,6 +144,7 @@ class KodexApp:
             self._input_monitor.stop()
         if self.db:
             self.db.close()
+        _remove_pid_file()
         log.info("Kodex stopped")
 
     # ── hotstring loading ───────────────────────────────────────────

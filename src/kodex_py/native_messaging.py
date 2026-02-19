@@ -349,16 +349,38 @@ def _is_process_alive(pid: int) -> bool:
         return True  # Assume alive on error
 
 
-def _watchdog_thread(parent_pid: int, check_interval: float = 2.0) -> None:
-    """Background thread that monitors parent process and triggers shutdown."""
-    log.debug("Watchdog started, monitoring parent PID %d", parent_pid)
+def _is_kodex_running() -> bool:
+    """Check if Kodex app is running by checking its PID file."""
+    pid_file = _DATA_DIR / "kodex.pid"
+    
+    if not pid_file.exists():
+        return False
+    
+    try:
+        pid = int(pid_file.read_text().strip())
+        return _is_process_alive(pid)
+    except (ValueError, OSError) as e:
+        log.debug("Error reading Kodex PID file: %s", e)
+        return False
+
+
+def _watchdog_thread(parent_pid: int | None, check_interval: float = 2.0) -> None:
+    """Background thread that monitors parent process AND Kodex app."""
+    log.debug("Watchdog started, monitoring parent PID %s and Kodex PID file", parent_pid)
     
     while not _shutdown_flag.is_set():
-        if not _is_process_alive(parent_pid):
+        # Check if Chrome (parent) is gone
+        if parent_pid and not _is_process_alive(parent_pid):
             log.info("Parent process (PID %d) is gone. Triggering shutdown.", parent_pid)
             _shutdown_flag.set()
-            # Force exit since stdin.read() is blocking
             os._exit(0)
+        
+        # Check if Kodex app is running
+        if not _is_kodex_running():
+            log.info("Kodex app is not running. Triggering shutdown.")
+            _shutdown_flag.set()
+            os._exit(0)
+        
         time.sleep(check_interval)
 
 
@@ -380,18 +402,15 @@ def run() -> None:
         msvcrt.setmode(sys.stdout.fileno(), os.O_BINARY)
         log.debug("Windows: set stdin/stdout to binary mode")
 
-    # Start parent process watchdog (Windows workaround for pipe EOF issues)
+    # Start watchdog thread (monitors Chrome parent AND Kodex app)
     parent_pid = _get_parent_pid()
-    if parent_pid:
-        log.info("Parent PID: %d — starting watchdog", parent_pid)
-        watchdog = threading.Thread(
-            target=_watchdog_thread, 
-            args=(parent_pid,), 
-            daemon=True
-        )
-        watchdog.start()
-    else:
-        log.warning("Could not determine parent PID — watchdog disabled")
+    log.info("Parent PID: %s — starting watchdog (also monitoring Kodex PID file)", parent_pid)
+    watchdog = threading.Thread(
+        target=_watchdog_thread, 
+        args=(parent_pid,), 
+        daemon=True
+    )
+    watchdog.start()
 
     # Use raw binary I/O — critical for native messaging protocol correctness.
     # DO NOT wrap in TextIOWrapper; the 4-byte length prefix is binary.
