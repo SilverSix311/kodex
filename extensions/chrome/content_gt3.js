@@ -4,12 +4,8 @@
  * Extracts region/simulator context from Linden Lab's GT3 tool at:
  *   support-tools.agni.lindenlab.com/gridtool/region/{UUID}
  *
- * Fields extracted:
- *   Region Summary: region_name, region_uuid, estate_name, estate_id,
- *                   parent_estate, grid_coords, owner, alt_payor
- *   Billing: description, product, sku, bill_date, price
- *   Simulator Host: running_on, current_channel, next_channel, class,
- *                   sims_cpu, updated, last_simstate_save
+ * Sections: #region-summary, #billing, #simulator-host, #other-region-info
+ * Table structure: <tr><th>Label</th><td>Value</td></tr>
  */
 
 (function () {
@@ -24,24 +20,55 @@
     return el ? el.textContent.trim() : null;
   }
 
-  function getTableValue(labelText) {
-    // GT3 uses tables with label in first column, value in second
-    // Pattern: <tr><td>Region Name</td><td>Hawt Pink (M)</td></tr>
-    const rows = document.querySelectorAll("tr");
+  /**
+   * Get value from GT3 tables (uses <th> for labels, <td> for values)
+   * Optionally scope to a specific widget section
+   */
+  function getTableValue(labelText, sectionId = null) {
+    let tables;
+    if (sectionId) {
+      const section = document.getElementById(sectionId);
+      if (!section) return null;
+      tables = section.querySelectorAll("table.data");
+    } else {
+      tables = document.querySelectorAll("table.data.side_by_side");
+    }
+
+    for (const table of tables) {
+      const rows = table.querySelectorAll("tr");
+      for (const row of rows) {
+        const th = row.querySelector("th");
+        const td = row.querySelector("td");
+        if (th && td) {
+          const label = th.textContent.trim();
+          if (label.toLowerCase() === labelText.toLowerCase()) {
+            // Check for link inside
+            const link = td.querySelector("a");
+            if (link && link.textContent.trim()) {
+              return link.textContent.trim();
+            }
+            return td.textContent.trim();
+          }
+        }
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Get value from #customer-info sidebar
+   */
+  function getSidebarValue(labelText) {
+    const sidebar = document.getElementById("customer-info");
+    if (!sidebar) return null;
+
+    const rows = sidebar.querySelectorAll("tr");
     for (const row of rows) {
-      const cells = row.querySelectorAll("td, th");
+      const cells = row.querySelectorAll("td");
       if (cells.length >= 2) {
         const label = cells[0].textContent.trim();
-        if (label.toLowerCase() === labelText.toLowerCase() ||
-            label.toLowerCase().includes(labelText.toLowerCase())) {
-          // Get the value from the next cell (or second cell)
-          const valueCell = cells[1];
-          // Check if there's a link inside
-          const link = valueCell.querySelector("a");
-          if (link) {
-            return link.textContent.trim();
-          }
-          return valueCell.textContent.trim();
+        if (label.toLowerCase().includes(labelText.toLowerCase())) {
+          return cells[1].textContent.trim();
         }
       }
     }
@@ -69,49 +96,60 @@
     // Extract UUID from URL
     const regionUuidFromUrl = getUUIDFromURL();
 
-    // ── Region Summary ──
-    const regionName = getTableValue("Region Name");
-    const estateName = getTableValue("Estate Name");
-    const estateId = getTableValue("Estate ID");
-    const parentEstate = getTableValue("Parent Estate");
-    const gridCoords = getTableValue("Grid Coords");
-    const owner = getTableValue("Owner");
-    const altPayor = getTableValue("Alt Payor");
+    // ── From sidebar ──
+    const regionNameSidebar = getText("#customer-info span.region-name");
+    const regionUuidSidebar = getText("#customer-info td.select_on_click");
+    
+    // Status from sidebar
+    const statusEl = document.querySelector("#customer-info .region-status-up a, #customer-info .region-status-down a");
+    const regionStatus = statusEl ? statusEl.textContent.trim() : null;
+    const agentsText = getText("#customer-info .region-status-up .small-font, #customer-info .region-status-down .small-font");
+    const agentCount = agentsText ? agentsText.replace(/[^0-9]/g, "") : null;
 
-    // ── Billing ──
-    const description = getTableValue("Description");
-    const product = getTableValue("Product");
-    const sku = getTableValue("SKU");
-    const billDate = getTableValue("Bill Date");
-    const price = getTableValue("Price");
+    // ── Region Summary section ──
+    const regionName = getTableValue("Region Name", "region-summary") || regionNameSidebar;
+    const estateName = getTableValue("Estate Name", "region-summary");
+    const estateId = getTableValue("Estate ID", "region-summary");
+    const parentEstate = getTableValue("Parent Estate", "region-summary");
+    const gridCoords = getTableValue("Grid Coords", "region-summary");
+    const owner = getTableValue("Owner", "region-summary");
+    const altPayor = getTableValue("Alt Payor", "region-summary");
 
-    // ── Simulator Host ──
-    const runningOn = getTableValue("Running On");
-    const lastOn = getTableValue("Last On");
-    const currentChannel = getTableValue("Current Channel");
-    const nextChannel = getTableValue("Next Channel");
-    const simClass = getTableValue("Class");
-    const simsCpu = getTableValue("Sims/CPU");
-    const updated = getTableValue("Updated");
-    const lastSimstateSave = getTableValue("Last Simstate Save");
+    // ── Billing section ──
+    const description = getTableValue("Description", "billing");
+    const product = getTableValue("Product", "billing");
+    const sku = getTableValue("SKU", "billing");
+    const billDate = getTableValue("Bill Date", "billing");
+    const price = getTableValue("Price", "billing");
 
-    // Extract region name from page title as fallback
-    // "Hawt Pink Region Summary" → "Hawt Pink"
-    let regionNameFromTitle = null;
-    const titleMatch = document.title.match(/^(.+?)\s+Region\s+Summary/i);
-    if (titleMatch) {
-      regionNameFromTitle = titleMatch[1];
-    }
+    // ── Simulator Host section ──
+    const runningOn = getTableValue("Running On (PID:Host)", "simulator-host");
+    const lastOn = getTableValue("Last On (PID:Host)", "simulator-host");
+    const currentChannel = getTableValue("Current Channel", "simulator-host");
+    const nextChannel = getTableValue("Next Channel", "simulator-host");
+    const simClass = getTableValue("Class", "simulator-host");
+    const simsCpu = getTableValue("Sims/CPU", "simulator-host");
+    const updated = getTableValue("Updated", "simulator-host");
+    const running = getTableValue("Running", "simulator-host");
+    const lastSimstateSave = getTableValue("Last Simstate Save", "simulator-host");
+    const hostPort = getTableValue("Host:Port", "simulator-host");
 
-    // Get header info for additional context
-    const pageHeader = getText("h1, h2, .page-title");
+    // ── Other Region Info section ──
+    const access = getTableValue("Access", "other-region-info");
+    const maxAgents = getTableValue("Max Agents", "other-region-info");
+    const hardMaxAgents = getTableValue("Hard Max Agents", "other-region-info");
+    const isSandbox = getTableValue("Sandbox", "other-region-info");
 
     return {
       source: SOURCE,
       
       // Region identifiers
-      region_uuid: regionUuidFromUrl,
-      region_name: regionName || regionNameFromTitle,
+      region_uuid: regionUuidFromUrl || regionUuidSidebar,
+      region_name: regionName,
+      
+      // Status
+      status: regionStatus,
+      agent_count: agentCount,
       
       // Estate info
       estate_name: estateName,
@@ -138,7 +176,15 @@
       sim_class: simClass,
       sims_cpu: simsCpu,
       updated: updated,
+      running: running,
       last_simstate_save: lastSimstateSave,
+      host_port: hostPort,
+      
+      // Region settings
+      access: access,
+      max_agents: maxAgents,
+      hard_max_agents: hardMaxAgents,
+      is_sandbox: isSandbox,
       
       // Meta
       url: url,

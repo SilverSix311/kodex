@@ -4,14 +4,10 @@
  * Extracts customer context from Linden Lab's CSR tool at:
  *   support-tools.agni.lindenlab.com/csr/summary/{UUID}/?view=csr-concierge
  *
- * Fields extracted:
- *   - customer_id (UUID from URL and page)
- *   - real_name
- *   - agent_id
- *   - account_id
- *   - persona_id
- *   - tilia_wallet_id
- *   - avatar_name (from page header)
+ * Fields extracted from #customer-info sidebar:
+ *   - customer_id, agent_id, account_id, persona_id, tilia_wallet_id, real_name
+ * Additional fields from page content:
+ *   - avatar_name (from header), email, display_name, account_status, etc.
  */
 
 (function () {
@@ -26,26 +22,47 @@
     return el ? el.textContent.trim() : null;
   }
 
-  function getTextByLabel(labelText) {
-    // Find a label element and get the adjacent value
-    // Works for patterns like: <td>Customer ID</td><td>value</td>
-    // or <span>Customer ID:</span><span>value</span>
-    const labels = document.querySelectorAll("td, th, span, div, dt, label");
-    for (const label of labels) {
-      const text = label.textContent.trim();
-      if (text.toLowerCase().includes(labelText.toLowerCase())) {
-        // Try next sibling
-        let next = label.nextElementSibling;
-        if (next) {
-          const val = next.textContent.trim();
-          if (val && val !== text) return val;
+  /**
+   * Get value from #customer-info sidebar table
+   * Structure: <tr><td class="right">Label</td><td class="left">Value</td></tr>
+   */
+  function getCustomerInfoValue(labelText) {
+    const table = document.querySelector("#customer-info table.short-customer-desc");
+    if (!table) return null;
+
+    const rows = table.querySelectorAll("tr");
+    for (const row of rows) {
+      const cells = row.querySelectorAll("td");
+      if (cells.length >= 2) {
+        const label = cells[0].textContent.trim();
+        if (label.toLowerCase().includes(labelText.toLowerCase())) {
+          return cells[1].textContent.trim();
         }
-        // Try parent's next sibling (for nested structures)
-        if (label.parentElement) {
-          next = label.parentElement.nextElementSibling;
-          if (next) {
-            const val = next.textContent.trim();
-            if (val && val !== text) return val;
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Get value from main content tables (Useful Info, All Fields sections)
+   * Structure: <tr><th>Label</th><td>Value</td></tr>
+   */
+  function getTableValue(labelText) {
+    const tables = document.querySelectorAll("table.data.side_by_side");
+    for (const table of tables) {
+      const rows = table.querySelectorAll("tr");
+      for (const row of rows) {
+        const th = row.querySelector("th");
+        const td = row.querySelector("td");
+        if (th && td) {
+          const label = th.textContent.trim();
+          if (label.toLowerCase().includes(labelText.toLowerCase())) {
+            // Check for link inside
+            const link = td.querySelector("a");
+            if (link) {
+              return link.textContent.trim();
+            }
+            return td.textContent.trim();
           }
         }
       }
@@ -54,7 +71,7 @@
   }
 
   function getUUIDFromURL() {
-    // URL pattern: /csr/summary/{UUID}/?view=csr-concierge
+    // URL pattern: /csr/summary/{UUID}/ or /csr/summary/{UUID}/?view=...
     const match = window.location.pathname.match(
       /\/csr\/(?:summary|detail|view)\/([a-f0-9]{32})/i
     );
@@ -67,78 +84,79 @@
     const url = window.location.href;
 
     // Check if this is a CSR page
-    if (!url.includes("/csr/") && !url.includes("view=csr")) {
+    if (!url.includes("/csr/")) {
       return null;
     }
 
     // Extract UUID from URL
     const customerIdFromUrl = getUUIDFromURL();
 
-    // Extract fields from the page info panel
-    const customerId =
-      getTextByLabel("Customer ID") ||
-      customerIdFromUrl ||
-      null;
+    // ── From #customer-info sidebar ──
+    const customerId = getCustomerInfoValue("Customer ID") || customerIdFromUrl;
+    const agentId = getCustomerInfoValue("Agent ID");
+    const accountId = getCustomerInfoValue("Account ID");
+    const personaId = getCustomerInfoValue("Persona ID");
+    const tiliaWalletId = getCustomerInfoValue("Tilia Wallet ID");
+    const realName = getCustomerInfoValue("Real Name");
 
-    const realName =
-      getTextByLabel("Real Name") ||
-      getTextByLabel("Name") ||
-      null;
-
-    const agentId =
-      getTextByLabel("Agent ID") ||
-      null;
-
-    const accountId =
-      getTextByLabel("Account ID") ||
-      null;
-
-    const personaId =
-      getTextByLabel("Persona ID") ||
-      null;
-
-    const tiliaWalletId =
-      getTextByLabel("Tilia Wallet ID") ||
-      getTextByLabel("Wallet ID") ||
-      null;
-
-    // Avatar/resident name from header (e.g., "Gimmesamoa.Resident - Summary")
-    const headerText = getText("h1, h2, .page-title, .header-title");
+    // ── From page header ──
+    // Header format: "Klyde.Linden - Summary"
+    const headerText = getText("#global-header h2");
     let avatarName = null;
     if (headerText) {
-      // Extract "Username.Resident" or just "Username" from header
-      const avatarMatch = headerText.match(/([A-Za-z0-9]+(?:\.[A-Za-z]+)?)\s*[-–—]/);
-      if (avatarMatch) {
-        avatarName = avatarMatch[1];
-      } else if (headerText.includes(".Resident")) {
-        avatarName = headerText.split(/\s*[-–—]/)[0].trim();
+      const match = headerText.match(/^([^\s-]+)/);
+      if (match) {
+        avatarName = match[1];
       }
     }
 
-    // Also try the link that shows avatar name
-    if (!avatarName) {
-      const avatarLink = document.querySelector('a[href*="secondlife.com"]');
-      if (avatarLink) {
-        avatarName = avatarLink.textContent.trim();
-      }
-    }
+    // ── From content tables ──
+    const displayName = getTableValue("Display Name");
+    const email = getTableValue("Email");
+    const accountStatus = getTableValue("Account Status");
+    const accountType = getTableValue("Account Type");
+    const serviceLevel = getTableValue("Default Service Level");
+    const lindenBalance = getTableValue("L$ Balance");
+    const usdBalance = getTableValue("US Dollar Balance");
+    const lastLogin = getTableValue("Last Login");
+    const createdDate = getTableValue("Created Date");
 
-    // Grid name (from "AGNI" header if visible)
-    const gridName =
-      getText(".grid-name") ||
-      getText("h1:first-of-type") ||
-      null;
+    // Also grab from "resident" link if available
+    const residentLink = document.querySelector(".resident a.type-person");
+    if (!avatarName && residentLink) {
+      avatarName = residentLink.textContent.trim();
+    }
 
     return {
       source: SOURCE,
+      
+      // Primary identifiers
       customer_id: customerId,
-      real_name: realName,
       agent_id: agentId,
       account_id: accountId,
       persona_id: personaId,
       tilia_wallet_id: tiliaWalletId,
+      
+      // Names
+      real_name: realName,
       avatar_name: avatarName,
-      grid: gridName,
+      display_name: displayName,
+      
+      // Account info
+      email: email,
+      account_status: accountStatus,
+      account_type: accountType,
+      service_level: serviceLevel,
+      
+      // Balances
+      linden_balance: lindenBalance,
+      usd_balance: usdBalance,
+      
+      // Dates
+      last_login: lastLogin,
+      created_date: createdDate,
+      
+      // Meta
       url: url,
       page_title: document.title,
     };
