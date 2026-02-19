@@ -244,22 +244,10 @@
     }, 300);
   }
 
-  // Run on page load
-  maybeSend();
-
-  // Watch for SPA navigation
-  let lastUrl = window.location.href;
-  setInterval(() => {
-    if (window.location.href !== lastUrl) {
-      lastUrl = window.location.href;
-      lastSentUrl = null;
-      lastSentQuestion = null;
-      cachedSecurityQuestion = null;
-      setTimeout(maybeSend, 500);
-    }
-  }, 500);
-
   // ── Watch for Security Questions dialog ────────────────────────────────────
+  
+  // Track if we auto-opened the dialog (so we know to auto-close it)
+  let autoOpenedDialog = false;
   
   const observer = new MutationObserver((mutations) => {
     for (const mutation of mutations) {
@@ -282,6 +270,16 @@
                   console.log("[Kodex/CSR] Captured security question:", question);
                   cachedSecurityQuestion = question;
                   maybeSend(true);
+                  
+                  // If we auto-opened this dialog, close it automatically
+                  if (autoOpenedDialog) {
+                    autoOpenedDialog = false;
+                    const closeBtn = dialog.querySelector(".ui-dialog-titlebar-close");
+                    if (closeBtn) {
+                      console.log("[Kodex/CSR] Auto-closing Security Questions dialog");
+                      closeBtn.click();
+                    }
+                  }
                 }
               }, 200);
             }
@@ -296,6 +294,48 @@
     childList: true,
     subtree: true,
   });
+
+  // ── Auto-fetch Security Question ───────────────────────────────────────────
+  
+  function autoFetchSecurityQuestion() {
+    // Don't fetch if we already have it cached
+    if (cachedSecurityQuestion) {
+      console.log("[Kodex/CSR] Security question already cached, skipping auto-fetch");
+      return;
+    }
+    
+    // Find the clickable element
+    const clickable = document.querySelector("td.edit-security-questions.clickable");
+    if (!clickable) {
+      console.log("[Kodex/CSR] Security question element not found on page");
+      return;
+    }
+    
+    console.log("[Kodex/CSR] Auto-clicking Security Questions to fetch...");
+    autoOpenedDialog = true;
+    clickable.click();
+  }
+
+  // ── Run on page load ───────────────────────────────────────────────────────
+  
+  maybeSend();
+  
+  // Auto-fetch security question after page loads (delay for DOM ready)
+  setTimeout(autoFetchSecurityQuestion, 1000);
+
+  // Watch for SPA navigation
+  let lastUrl = window.location.href;
+  setInterval(() => {
+    if (window.location.href !== lastUrl) {
+      lastUrl = window.location.href;
+      lastSentUrl = null;
+      lastSentQuestion = null;
+      cachedSecurityQuestion = null;
+      setTimeout(maybeSend, 500);
+      // Also auto-fetch security question for new customer
+      setTimeout(autoFetchSecurityQuestion, 1500);
+    }
+  }, 500);
 
   // ── Send context when tab gains focus ────────────────────────────────────
 
