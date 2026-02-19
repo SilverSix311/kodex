@@ -1,10 +1,15 @@
 /**
- * Kodex Context Bridge — GT3 Content Script
+ * Kodex Context Bridge — GT3 (Grid Tool 3) Content Script
  *
- * Placeholder for Linden Lab's internal GT3 tool (gt3.lindenlab.com).
- * Extracts whatever visible fields are available and sends them to Kodex.
+ * Extracts region/simulator context from Linden Lab's GT3 tool at:
+ *   support-tools.agni.lindenlab.com/gridtool/region/{UUID}
  *
- * TODO: Inspect actual GT3 DOM and refine selectors once we have access.
+ * Fields extracted:
+ *   Region Summary: region_name, region_uuid, estate_name, estate_id,
+ *                   parent_estate, grid_coords, owner, alt_payor
+ *   Billing: description, product, sku, bill_date, price
+ *   Simulator Host: running_on, current_channel, next_channel, class,
+ *                   sims_cpu, updated, last_simstate_save
  */
 
 (function () {
@@ -19,75 +24,123 @@
     return el ? el.textContent.trim() : null;
   }
 
-  function getAttr(selector, attr) {
-    const el = document.querySelector(selector);
-    return el ? (el.getAttribute(attr) || "").trim() : null;
+  function getTableValue(labelText) {
+    // GT3 uses tables with label in first column, value in second
+    // Pattern: <tr><td>Region Name</td><td>Hawt Pink (M)</td></tr>
+    const rows = document.querySelectorAll("tr");
+    for (const row of rows) {
+      const cells = row.querySelectorAll("td, th");
+      if (cells.length >= 2) {
+        const label = cells[0].textContent.trim();
+        if (label.toLowerCase() === labelText.toLowerCase() ||
+            label.toLowerCase().includes(labelText.toLowerCase())) {
+          // Get the value from the next cell (or second cell)
+          const valueCell = cells[1];
+          // Check if there's a link inside
+          const link = valueCell.querySelector("a");
+          if (link) {
+            return link.textContent.trim();
+          }
+          return valueCell.textContent.trim();
+        }
+      }
+    }
+    return null;
+  }
+
+  function getUUIDFromURL() {
+    // URL pattern: /gridtool/region/{UUID}
+    const match = window.location.pathname.match(
+      /\/gridtool\/region\/([a-f0-9-]{36})/i
+    );
+    return match ? match[1] : null;
   }
 
   // ── Context extraction ─────────────────────────────────────────────────────
-  // These are best-guess selectors. Update once actual GT3 DOM is known.
 
   function extractContext() {
     const url = window.location.href;
 
-    // Try to detect a ticket/issue/case ID from the URL
-    const ticketMatch = url.match(/[?&](?:ticket|issue|case|id)[_\-]?(?:id|number)?[=\/](\d+)/i)
-      || url.match(/\/(?:ticket|issue|case)s?\/(\d+)/i)
-      || url.match(/\/(\d{4,})/);
+    // Check if this is a GT3/gridtool page
+    if (!url.includes("/gridtool/")) {
+      return null;
+    }
 
-    const ticketNumber = ticketMatch ? ticketMatch[1] : null;
+    // Extract UUID from URL
+    const regionUuidFromUrl = getUUIDFromURL();
 
-    // Generic field extraction
-    const subject =
-      getText("h1") ||
-      getText(".issue-title") ||
-      getText(".ticket-title") ||
-      getText('[class*="title"]') ||
-      getText('[class*="subject"]') ||
-      document.title || null;
+    // ── Region Summary ──
+    const regionName = getTableValue("Region Name");
+    const estateName = getTableValue("Estate Name");
+    const estateId = getTableValue("Estate ID");
+    const parentEstate = getTableValue("Parent Estate");
+    const gridCoords = getTableValue("Grid Coords");
+    const owner = getTableValue("Owner");
+    const altPayor = getTableValue("Alt Payor");
 
-    const customerName =
-      getText(".customer-name") ||
-      getText(".requester-name") ||
-      getText('[class*="customer"]') ||
-      getText('[class*="requester"]') ||
-      getText('[class*="user-name"]') ||
-      null;
+    // ── Billing ──
+    const description = getTableValue("Description");
+    const product = getTableValue("Product");
+    const sku = getTableValue("SKU");
+    const billDate = getTableValue("Bill Date");
+    const price = getTableValue("Price");
 
-    const customerEmail =
-      getAttr('a[href^="mailto:"]', "href")?.replace("mailto:", "") ||
-      getText(".email") ||
-      getText('[class*="email"]') ||
-      null;
+    // ── Simulator Host ──
+    const runningOn = getTableValue("Running On");
+    const lastOn = getTableValue("Last On");
+    const currentChannel = getTableValue("Current Channel");
+    const nextChannel = getTableValue("Next Channel");
+    const simClass = getTableValue("Class");
+    const simsCpu = getTableValue("Sims/CPU");
+    const updated = getTableValue("Updated");
+    const lastSimstateSave = getTableValue("Last Simstate Save");
 
-    const status =
-      getText(".status") ||
-      getText(".issue-status") ||
-      getText('[class*="status"]') ||
-      null;
+    // Extract region name from page title as fallback
+    // "Hawt Pink Region Summary" → "Hawt Pink"
+    let regionNameFromTitle = null;
+    const titleMatch = document.title.match(/^(.+?)\s+Region\s+Summary/i);
+    if (titleMatch) {
+      regionNameFromTitle = titleMatch[1];
+    }
 
-    // GT3 might show account/SL-specific fields
-    const accountId =
-      getText(".account-id") ||
-      getText('[data-field="account_id"]') ||
-      getText('[class*="account-id"]') ||
-      null;
-
-    const slUsername =
-      getText(".sl-username") ||
-      getText('[class*="username"]') ||
-      getText('[data-field="username"]') ||
-      null;
+    // Get header info for additional context
+    const pageHeader = getText("h1, h2, .page-title");
 
     return {
       source: SOURCE,
-      ticket_number: ticketNumber,
-      subject: subject,
-      customer_name: customerName,
-      customer_email: customerEmail,
-      sl_username: slUsername,
-      account_id: accountId,
-      status: status,
+      
+      // Region identifiers
+      region_uuid: regionUuidFromUrl,
+      region_name: regionName || regionNameFromTitle,
+      
+      // Estate info
+      estate_name: estateName,
+      estate_id: estateId,
+      parent_estate: parentEstate,
+      owner: owner,
+      alt_payor: altPayor,
+      
+      // Location
+      grid_coords: gridCoords,
+      
+      // Billing
+      billing_description: description,
+      product: product,
+      sku: sku,
+      bill_date: billDate,
+      price: price,
+      
+      // Simulator
+      running_on: runningOn,
+      last_on: lastOn,
+      current_channel: currentChannel,
+      next_channel: nextChannel,
+      sim_class: simClass,
+      sims_cpu: simsCpu,
+      updated: updated,
+      last_simstate_save: lastSimstateSave,
+      
+      // Meta
       url: url,
       page_title: document.title,
     };

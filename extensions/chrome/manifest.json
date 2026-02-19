@@ -20,12 +20,12 @@
       "run_at": "document_idle"
     },
     {
-      "matches": ["*://csr.lindenlab.com/*"],
+      "matches": ["*://support-tools.agni.lindenlab.com/csr/*"],
       "js": ["content_csr.js"],
       "run_at": "document_idle"
     },
     {
-      "matches": ["*://gt3.lindenlab.com/*"],
+      "matches": ["*://support-tools.agni.lindenlab.com/gridtool/*"],
       "js": ["content_gt3.js"],
       "run_at": "document_idle"
     }
