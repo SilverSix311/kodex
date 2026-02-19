@@ -143,7 +143,7 @@ class KodexApp:
 
         # Prompt callback — uses tkinter dialog if available
         prompt_fn = None
-        if "%p" in hs.replacement:
+        if "%prompt%" in hs.replacement:
             prompt_fn = self._prompt_user
 
         # trigger is non-None for space/tab/enter (character already typed)

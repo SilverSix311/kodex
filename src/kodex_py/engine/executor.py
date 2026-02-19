@@ -60,11 +60,11 @@ def execute(
     # ── handle script mode (::scr::) ───────────────────────────────
     if is_script:
         text = replacement
-        if "%p" in text and prompt_fn:
+        if "%prompt%" in text and prompt_fn:
             result = prompt_fn(text)
             if result is None:
                 return False
-            text = text.replace("%p", result)
+            text = text.replace("%prompt%", result)
         # Script mode in AHK just SendInput'd the text raw — we replicate
         sender.type_text(text)
         return True
@@ -76,10 +76,10 @@ def execute(
     if send_mode == SendMode.DIRECT:
         text = text.replace("\r\n", "\n")
 
-    # Prompt (%p) — must happen before other substitutions so the
+    # Prompt (%prompt%) — must happen before other substitutions so the
     # user sees the raw template.
     prompt_value: str | None = None
-    if "%p" in text:
+    if "%prompt%" in text:
         if prompt_fn:
             prompt_value = prompt_fn(text)
             if prompt_value is None:
@@ -89,11 +89,11 @@ def execute(
 
     text = substitute(text, prompt_value=prompt_value)
 
-    # ── cursor positioning (%|) ─────────────────────────────────────
+    # ── cursor positioning (%cursor%) ────────────────────────────────
     return_to = 0
-    if "%|" in text:
-        cursor_pos = text.index("%|")
-        text = text.replace("%|", "")
+    if "%cursor%" in text:
+        cursor_pos = text.index("%cursor%")
+        text = text.replace("%cursor%", "")
         return_to = len(text) - cursor_pos
 
     # ── inject ──────────────────────────────────────────────────────

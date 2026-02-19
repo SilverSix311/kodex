@@ -42,7 +42,7 @@ def _show_prompt_dialog(template: str, parent=None) -> str | None:
     win.focus_force()
 
     # Template display
-    display_template = template.replace("%p", "[%p]")
+    display_template = template.replace("%prompt%", "[%prompt%]")
 
     outer = ctk.CTkFrame(win, fg_color="transparent")
     outer.pack(fill="both", expand=True, padx=16, pady=16)

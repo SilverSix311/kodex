@@ -1,14 +1,14 @@
 """Variable token substitution for replacement text.
 
 Tokens (evaluated at expansion time):
-    %c   — current clipboard contents
-    %t   — short time   (e.g. "2:30 PM")
-    %ds  — short date   (e.g. "1/29/2026")
-    %dl  — long date    (e.g. "January 29, 2026")
-    %tl  — long time    (e.g. "14:30:45 PM")
-    %p   — user prompt  (caller must supply the value)
-    %|   — cursor position marker (handled by the executor, not here)
-    %name% — global/ticket variable (see global_variables.py)
+    %clipboard%   — current clipboard contents
+    %time%        — short time   (e.g. "2:30 PM")
+    %time_long%   — long time    (e.g. "14:30:45 PM")
+    %date_short%  — short date   (e.g. "1/29/2026")
+    %date_long%   — long date    (e.g. "January 29, 2026")
+    %prompt%      — user prompt  (caller must supply the value)
+    %cursor%      — cursor position marker (handled by the executor, not here)
+    %name%        — global/ticket variable (see global_variables.py)
 """
 
 from __future__ import annotations
@@ -27,11 +27,11 @@ def substitute(
 ) -> str:
     """Replace all variable tokens in *text*.
 
-    ``%p`` is replaced with *prompt_value* when given; if ``%p`` is present
-    and *prompt_value* is ``None``, it is left as-is (the caller should
-    have already prompted the user).
+    ``%prompt%`` is replaced with *prompt_value* when given; if ``%prompt%`` 
+    is present and *prompt_value* is ``None``, it is left as-is (the caller 
+    should have already prompted the user).
 
-    ``%|`` is **not** stripped here — the executor needs to see it to
+    ``%cursor%`` is **not** stripped here — the executor needs to see it to
     calculate cursor offset.
 
     Global/ticket variables (``%var_name%``) are also substituted.
@@ -39,36 +39,35 @@ def substitute(
     """
     now = now or datetime.now()
 
-    # %c — clipboard
-    if "%c" in text:
+    # %clipboard% — clipboard contents
+    if "%clipboard%" in text:
         try:
             clip = pyperclip.paste() or ""
         except Exception:
             clip = ""
-        text = text.replace("%c", clip)
+        text = text.replace("%clipboard%", clip)
 
-    # %tl — long time HH:mm:ss (must come before %t to avoid substring collision)
-    if "%tl" in text:
-        text = text.replace("%tl", now.strftime("%H:%M:%S %p"))
+    # %time_long% — long time HH:mm:ss
+    if "%time_long%" in text:
+        text = text.replace("%time_long%", now.strftime("%H:%M:%S %p"))
 
-    # %t — short time (locale-aware)
-    if "%t" in text:
-        text = text.replace("%t", _format_short_time(now))
+    # %time% — short time (locale-aware)
+    if "%time%" in text:
+        text = text.replace("%time%", _format_short_time(now))
 
-    # %dl — long date (must come before %ds to avoid substring collision)
-    if "%dl" in text:
-        text = text.replace("%dl", _format_long_date(now))
+    # %date_long% — long date
+    if "%date_long%" in text:
+        text = text.replace("%date_long%", _format_long_date(now))
 
-    # %ds — short date
-    if "%ds" in text:
-        text = text.replace("%ds", _format_short_date(now))
+    # %date_short% — short date
+    if "%date_short%" in text:
+        text = text.replace("%date_short%", _format_short_date(now))
 
-    # %p — user-supplied prompt value
-    if "%p" in text and prompt_value is not None:
-        text = text.replace("%p", prompt_value)
+    # %prompt% — user-supplied prompt value
+    if "%prompt%" in text and prompt_value is not None:
+        text = text.replace("%prompt%", prompt_value)
 
     # Global/ticket variables (%var_name%)
-    # Must be after built-in tokens to avoid conflicts
     text = _substitute_global_variables(text)
 
     return text

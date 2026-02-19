@@ -602,19 +602,19 @@ class ViewVariablesDialog:
     """Read-only dialog that shows all available Kodex variables.
 
     Sections:
-      1. Built-in variables  (%c, %t, %tl, %ds, %dl, %p, %|)
-      2. Ticket Context      (freshdesk_context.json)
+      1. Built-in variables  (%clipboard%, %time%, %date_short%, etc.)
+      2. Ticket Context      (freshdesk_context.json, csr_context.json, gt3_context.json)
       3. Global Variables    (global_variables.json)
     """
 
     _BUILTIN_VARS: list[tuple[str, str]] = [
-        ("%c",  "Clipboard contents"),
-        ("%t",  "Short time (e.g., 2:30 PM)"),
-        ("%tl", "Long time (e.g., 14:30:45 PM)"),
-        ("%ds", "Short date (e.g., 1/29/2026)"),
-        ("%dl", "Long date (e.g., January 29, 2026)"),
-        ("%p",  "Prompt — asks user for input"),
-        ("%|",  "Cursor position after expansion"),
+        ("%clipboard%",  "Clipboard contents"),
+        ("%time%",       "Short time (e.g., 2:30 PM)"),
+        ("%time_long%",  "Long time (e.g., 14:30:45 PM)"),
+        ("%date_short%", "Short date (e.g., 1/29/2026)"),
+        ("%date_long%",  "Long date (e.g., January 29, 2026)"),
+        ("%prompt%",     "Prompt — asks user for input"),
+        ("%cursor%",     "Cursor position after expansion"),
     ]
 
     # Colours reused from parent module
