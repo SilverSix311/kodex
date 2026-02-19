@@ -713,6 +713,15 @@ class ViewVariablesDialog:
             log.warning("ViewVariablesDialog: could not load contexts: %s", exc)
 
         if all_contexts:
+            # Add hint about unprefixed variables
+            ctk.CTkLabel(
+                self._scroll,
+                text="  Tip: Unprefixed names (e.g. %email%) use the most recently updated source",
+                font=ctk.CTkFont(size=10, slant="italic"),
+                text_color=("gray50", "gray55"),
+                anchor="w",
+            ).pack(fill="x", padx=10, pady=(4, 6))
+            
             for source, ctx in sorted(all_contexts.items()):
                 if not ctx:
                     continue
@@ -729,12 +738,7 @@ class ViewVariablesDialog:
                 for key, value in sorted(ctx.items()):
                     if key.startswith("_"):
                         continue  # skip metadata
-                    self._add_row(
-                        f"%{key}%",
-                        self._fmt(value),
-                        copy_text=f"%{key}%",
-                    )
-                    # Also show prefixed version
+                    # Only show the prefixed version to reduce clutter
                     self._add_row(
                         f"%{source}_{key}%",
                         self._fmt(value),
