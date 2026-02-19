@@ -10,6 +10,7 @@ from __future__ import annotations
 import logging
 import os
 import platform
+import time
 from typing import Callable
 
 from kodex_py.storage.models import SendMode
@@ -56,6 +57,9 @@ def execute(
     # typed into the active field before the match callback fires.
     erase_count = len(hotstring_name) + (1 if trigger_char else 0)
     sender.send_backspaces(erase_count)
+    
+    # Brief pause to let the app process backspaces before injecting text
+    time.sleep(0.05)
 
     # ── handle script mode (::scr::) ───────────────────────────────
     if is_script:

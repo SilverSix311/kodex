@@ -24,9 +24,10 @@ log = logging.getLogger(__name__)
 class PreferencesWindow:
     """Preferences dialog with General / Print / Stats tabs."""
 
-    def __init__(self, db: "Database", parent=None) -> None:
+    def __init__(self, db: "Database", parent=None, on_save=None) -> None:
         self.db = db
         self._parent = parent
+        self._on_save = on_save  # Callback after config is saved
 
     def show(self) -> None:
         from kodex_py.config import load_config, save_config
@@ -189,6 +190,11 @@ class PreferencesWindow:
             cfg.run_at_startup = startup_var.get()
             cfg.autocorrect_enabled = autocorrect_var.get()
             save_config(self.db, cfg)
+            
+            # Notify app to reload config
+            if self._on_save:
+                self._on_save()
+            
             win.grab_release()
             win.destroy()
 

@@ -87,21 +87,25 @@ def paste_text(text: str) -> None:
 
     ctrl = _get_controller()
 
-    # Save
+    # Save current clipboard
     try:
         old_clip = pyperclip.paste()
     except Exception:
         old_clip = ""
 
-    # Set + paste
+    # Set clipboard and wait for it to be ready
     pyperclip.copy(text)
-    time.sleep(0.02)
+    time.sleep(0.05)  # Wait for clipboard to be set
+    
+    # Send Ctrl+V
     with ctrl.pressed(Key.ctrl):
         ctrl.press("v")
         ctrl.release("v")
-    time.sleep(0.15)
+    
+    # Wait for paste to complete before restoring
+    time.sleep(0.25)
 
-    # Restore
+    # Restore original clipboard
     try:
         pyperclip.copy(old_clip)
     except Exception:

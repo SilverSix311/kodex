@@ -102,8 +102,14 @@ def run_tray(app: "KodexApp") -> None:
     def on_preferences(icon, item) -> None:
         def _do():
             from kodex_py.gui.preferences import PreferencesWindow
+            from kodex_py.config import load_config
 
-            PreferencesWindow(app.db, parent=root).show()
+            def _on_config_saved():
+                """Reload config after preferences are saved."""
+                app.config = load_config(app.db)
+                log.info("Config reloaded — send_mode=%s", app.config.send_mode)
+
+            PreferencesWindow(app.db, parent=root, on_save=_on_config_saved).show()
 
         _schedule(_do)
 
