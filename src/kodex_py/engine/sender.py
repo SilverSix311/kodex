@@ -50,21 +50,30 @@ def send_backspaces(count: int) -> None:
         ctrl.release(Key.backspace)
 
 
-def type_text(text: str, *, chunk_size: int = 50, inter_chunk_delay: float = 0.005) -> None:
+def type_text(
+    text: str, 
+    *, 
+    char_delay: float = 0.008,
+    chunk_size: int = 30, 
+    inter_chunk_delay: float = 0.02
+) -> None:
     """Type *text* character-by-character using pynput.
 
-    For smoothness we send characters in small chunks with a tiny sleep
-    between them so the OS input queue doesn't stall.
+    For smoothness we send characters with a small delay between them
+    and a longer pause between chunks so the target app can keep up.
 
-    ``chunk_size`` and ``inter_chunk_delay`` are tuned for Windows;
-    adjust for other platforms if needed.
+    ``char_delay`` — seconds between each character (default 8ms)
+    ``chunk_size`` — characters before a longer pause (default 30)
+    ``inter_chunk_delay`` — pause between chunks (default 20ms)
     """
     ctrl = _get_controller()
-    for i in range(0, len(text), chunk_size):
-        chunk = text[i : i + chunk_size]
-        for ch in chunk:
-            ctrl.type(ch)
-        if i + chunk_size < len(text):
+    for i, ch in enumerate(text):
+        ctrl.type(ch)
+        # Small delay after each character
+        if char_delay > 0:
+            time.sleep(char_delay)
+        # Longer pause between chunks
+        if (i + 1) % chunk_size == 0 and i + 1 < len(text):
             time.sleep(inter_chunk_delay)
 
 
