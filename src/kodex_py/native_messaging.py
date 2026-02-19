@@ -18,9 +18,11 @@ Usage (not normally called directly — Chrome launches via native_host.bat):
 
 from __future__ import annotations
 
+import atexit
 import json
 import logging
 import os
+import signal
 import struct
 import sys
 from datetime import datetime
@@ -228,9 +230,15 @@ def _read_message(stdin) -> dict | None:
     Returns the parsed dict, or None on EOF/error.
     """
     # Read 4-byte little-endian length prefix
-    raw_len = stdin.read(4)
-    if len(raw_len) < 4:
-        log.info("stdin closed (EOF on length read)")
+    try:
+        raw_len = stdin.read(4)
+    except (OSError, ValueError) as e:
+        # Pipe broken or closed
+        log.info("stdin read error (pipe closed?): %s", e)
+        return None
+    
+    if not raw_len or len(raw_len) < 4:
+        log.info("stdin closed (EOF on length read, got %d bytes)", len(raw_len) if raw_len else 0)
         return None
 
     msg_len = struct.unpack("<I", raw_len)[0]
@@ -275,6 +283,13 @@ def run() -> None:
     log.info("Kodex native messaging host started (PID %d)", os.getpid())
     log.info("Data directory: %s", _DATA_DIR)
 
+    # Windows requires explicit binary mode on stdin/stdout
+    if sys.platform == "win32":
+        import msvcrt
+        msvcrt.setmode(sys.stdin.fileno(), os.O_BINARY)
+        msvcrt.setmode(sys.stdout.fileno(), os.O_BINARY)
+        log.debug("Windows: set stdin/stdout to binary mode")
+
     # Use raw binary I/O — critical for native messaging protocol correctness.
     # DO NOT wrap in TextIOWrapper; the 4-byte length prefix is binary.
     stdin = sys.stdin.buffer
@@ -315,18 +330,45 @@ def run() -> None:
                 "written_to": str(_context_file(source)),
             })
 
+        except BrokenPipeError:
+            log.info("Broken pipe — Chrome closed the connection. Exiting.")
+            break
         except Exception as e:
             log.error("Error processing message: %s", e, exc_info=True)
             try:
                 _write_message(stdout, {"success": False, "error": str(e)})
+            except BrokenPipeError:
+                log.info("Broken pipe on error response — exiting.")
+                break
             except Exception:
                 pass  # Can't write response — just continue
 
     log.info("Native messaging host exiting.")
 
 
+def _cleanup():
+    """Cleanup handler for atexit."""
+    log.info("Cleanup: native messaging host shutting down (PID %d)", os.getpid())
+    logging.shutdown()
+
+
+def _signal_handler(signum, frame):
+    """Handle termination signals."""
+    log.info("Received signal %d, exiting.", signum)
+    sys.exit(0)
+
+
 def main() -> None:
     """Entry point for `python -m kodex_py.native_messaging`."""
+    # Register cleanup
+    atexit.register(_cleanup)
+    
+    # Handle termination signals
+    signal.signal(signal.SIGTERM, _signal_handler)
+    signal.signal(signal.SIGINT, _signal_handler)
+    if sys.platform != "win32":
+        signal.signal(signal.SIGHUP, _signal_handler)
+    
     try:
         run()
     except KeyboardInterrupt:
@@ -334,6 +376,9 @@ def main() -> None:
     except Exception as e:
         log.critical("Fatal error: %s", e, exc_info=True)
         sys.exit(1)
+    finally:
+        log.info("Main function exiting.")
+        sys.exit(0)
 
 
 if __name__ == "__main__":
