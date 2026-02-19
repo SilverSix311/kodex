@@ -8,12 +8,17 @@
  *   - customer_id, agent_id, account_id, persona_id, tilia_wallet_id, real_name
  * Additional fields from page content:
  *   - avatar_name (from header), email, display_name, account_status, etc.
+ * From Security Questions dialog (when opened):
+ *   - security_question (question only, not answer)
  */
 
 (function () {
   "use strict";
 
   const SOURCE = "csr";
+  
+  // Cache for security question (persists until page reload)
+  let cachedSecurityQuestion = null;
 
   // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -78,6 +83,34 @@
     return match ? match[1] : null;
   }
 
+  /**
+   * Extract security question from the Security Questions dialog.
+   * Format: <li class="active_entry">Question text - <span class="answer">Answer</span>
+   * Returns just the question part.
+   */
+  function extractSecurityQuestion() {
+    // Look for the Security Questions dialog
+    const dialogs = document.querySelectorAll(".ui-dialog");
+    for (const dialog of dialogs) {
+      const title = dialog.querySelector(".ui-dialog-title");
+      if (title && title.textContent.trim() === "Security Questions") {
+        // Found the dialog — look for active question
+        const activeEntry = dialog.querySelector("li.active_entry");
+        if (activeEntry) {
+          // Get the full text content
+          const fullText = activeEntry.textContent.trim();
+          // Split on " - " to separate question from answer
+          const parts = fullText.split(" - ");
+          if (parts.length >= 1) {
+            // Return just the question (first part)
+            return parts[0].trim();
+          }
+        }
+      }
+    }
+    return null;
+  }
+
   // ── Context extraction ─────────────────────────────────────────────────────
 
   function extractContext() {
@@ -126,6 +159,9 @@
     if (!avatarName && residentLink) {
       avatarName = residentLink.textContent.trim();
     }
+    
+    // ── Security question (from cache or dialog) ──
+    const securityQuestion = cachedSecurityQuestion || extractSecurityQuestion();
 
     return {
       source: SOURCE,
@@ -147,6 +183,7 @@
       account_status: accountStatus,
       account_type: accountType,
       service_level: serviceLevel,
+      security_question: securityQuestion,
       
       // Balances
       linden_balance: lindenBalance,
@@ -180,21 +217,31 @@
   // ── Trigger logic ──────────────────────────────────────────────────────────
 
   let lastSentUrl = null;
+  let lastSentQuestion = null;
   let debounceTimer = null;
 
-  function maybeSend() {
+  function maybeSend(forceUpdate = false) {
     const context = extractContext();
     if (!context) return;
 
     const currentUrl = window.location.href;
-    if (currentUrl === lastSentUrl) return;
+    const currentQuestion = context.security_question;
+    
+    // Send if URL changed, or if security question was newly captured
+    const urlChanged = currentUrl !== lastSentUrl;
+    const questionChanged = currentQuestion && currentQuestion !== lastSentQuestion;
+    
+    if (!urlChanged && !questionChanged && !forceUpdate) return;
 
     clearTimeout(debounceTimer);
     debounceTimer = setTimeout(() => {
       lastSentUrl = currentUrl;
+      if (currentQuestion) {
+        lastSentQuestion = currentQuestion;
+      }
       console.log("[Kodex/CSR] Sending context:", context);
       sendContext(context);
-    }, 800);
+    }, 300);
   }
 
   // Run on page load
@@ -206,9 +253,49 @@
     if (window.location.href !== lastUrl) {
       lastUrl = window.location.href;
       lastSentUrl = null;
+      lastSentQuestion = null;
+      cachedSecurityQuestion = null;
       setTimeout(maybeSend, 500);
     }
   }, 500);
+
+  // ── Watch for Security Questions dialog ────────────────────────────────────
+  
+  const observer = new MutationObserver((mutations) => {
+    for (const mutation of mutations) {
+      for (const node of mutation.addedNodes) {
+        if (node.nodeType === Node.ELEMENT_NODE) {
+          // Check if this is a dialog or contains a dialog
+          const dialog = node.classList?.contains("ui-dialog") 
+            ? node 
+            : node.querySelector?.(".ui-dialog");
+          
+          if (dialog) {
+            const title = dialog.querySelector(".ui-dialog-title");
+            if (title && title.textContent.trim() === "Security Questions") {
+              console.log("[Kodex/CSR] Security Questions dialog detected");
+              
+              // Wait a moment for the dialog content to fully render
+              setTimeout(() => {
+                const question = extractSecurityQuestion();
+                if (question) {
+                  console.log("[Kodex/CSR] Captured security question:", question);
+                  cachedSecurityQuestion = question;
+                  maybeSend(true);
+                }
+              }, 200);
+            }
+          }
+        }
+      }
+    }
+  });
+
+  // Start observing for dialogs
+  observer.observe(document.body, {
+    childList: true,
+    subtree: true,
+  });
 
   // ── Send context when tab gains focus ────────────────────────────────────
 
