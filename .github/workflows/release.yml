@@ -2,8 +2,9 @@ name: Build Release
 
 on:
   push:
+    branches: [main]  # Pre-release on every push to main
     tags:
-      - 'v*'  # Triggers on v1.0.0, v3.1.0, etc.
+      - 'v*'  # Full release on version tags
 
 permissions:
   contents: write  # Needed to create releases
@@ -18,7 +19,11 @@ jobs:
         run: |
           if [ -z "$WEBHOOK_URL" ]; then exit 0; fi
           
-          VERSION="${{ github.ref_name }}"
+          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            VERSION="${{ github.ref_name }}"
+          else
+            VERSION="dev-$(echo ${{ github.sha }} | cut -c1-7)"
+          fi
           RUN_URL="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
           
           curl -sf -X POST "$WEBHOOK_URL" \
@@ -28,10 +33,28 @@ jobs:
   build:
     runs-on: windows-latest
     needs: [notify-start]
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      is_prerelease: ${{ steps.version.outputs.is_prerelease }}
     
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+      
+      - name: Determine version
+        id: version
+        shell: bash
+        run: |
+          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            VERSION="${{ github.ref_name }}"
+            IS_PRERELEASE=$([[ "$VERSION" == *-* ]] && echo "true" || echo "false")
+          else
+            VERSION="dev-$(echo ${{ github.sha }} | cut -c1-7)"
+            IS_PRERELEASE="true"
+          fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "is_prerelease=$IS_PRERELEASE" >> $GITHUB_OUTPUT
+          echo "Building version: $VERSION (prerelease: $IS_PRERELEASE)"
       
       - name: Set up Python 3.11
         uses: actions/setup-python@v5
@@ -58,17 +81,30 @@ jobs:
           go build -ldflags "-s -w" -o ../dist/kodex/Kodex-Debug.exe kodex.go
       
       - name: Create release zip
+        shell: pwsh
         run: |
           cd dist
-          Compress-Archive -Path kodex -DestinationPath "../kodex-${{ github.ref_name }}-windows.zip"
+          Compress-Archive -Path kodex -DestinationPath "../kodex-${{ steps.version.outputs.version }}-windows.zip"
+      
+      - name: Delete existing dev release (if dev build)
+        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+        uses: dev-drprasad/delete-tag-and-release@v1.0
+        with:
+          tag_name: dev-latest
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          delete_release: true
+        continue-on-error: true  # Don't fail if it doesn't exist
       
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
         with:
-          files: kodex-${{ github.ref_name }}-windows.zip
-          generate_release_notes: true
+          tag_name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || 'dev-latest' }}
+          name: ${{ steps.version.outputs.version }}
+          files: kodex-${{ steps.version.outputs.version }}-windows.zip
+          generate_release_notes: ${{ startsWith(github.ref, 'refs/tags/') }}
+          body: ${{ !startsWith(github.ref, 'refs/tags/') && format('Development build from commit {0}\n\n⚠️ This is a pre-release build for testing. Not recommended for production use.', github.sha) || '' }}
           draft: false
-          prerelease: ${{ contains(github.ref_name, '-') }}  # v3.1.0-beta = prerelease
+          prerelease: ${{ steps.version.outputs.is_prerelease }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -81,22 +117,40 @@ jobs:
         env:
           WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
           BUILD_STATUS: ${{ needs.build.result }}
+          VERSION: ${{ needs.build.outputs.version }}
+          IS_PRERELEASE: ${{ needs.build.outputs.is_prerelease }}
         run: |
           if [ -z "$WEBHOOK_URL" ]; then exit 0; fi
           
-          VERSION="${{ github.ref_name }}"
-          RELEASE_URL="https://github.com/${{ github.repository }}/releases/tag/${VERSION}"
-          DOWNLOAD_URL="https://github.com/${{ github.repository }}/releases/download/${VERSION}/kodex-${VERSION}-windows.zip"
+          # For dev builds, use dev-latest tag
+          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            TAG="${{ github.ref_name }}"
+          else
+            TAG="dev-latest"
+          fi
+          
+          RELEASE_URL="https://github.com/${{ github.repository }}/releases/tag/${TAG}"
+          DOWNLOAD_URL="https://github.com/${{ github.repository }}/releases/download/${TAG}/kodex-${VERSION}-windows.zip"
           RUN_URL="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
           
           if [ "$BUILD_STATUS" = "success" ]; then
+            if [ "$IS_PRERELEASE" = "true" ]; then
+              EMOJI="🧪"
+              TITLE="Pre-release"
+              COLOR=16750848
+            else
+              EMOJI="✅"
+              TITLE="Release"
+              COLOR=5763719
+            fi
+            
             PAYLOAD=$(cat <<EOF
           {
             "embeds": [{
-              "title": "✅ Kodex ${VERSION} — Build Complete!",
+              "title": "${EMOJI} Kodex ${VERSION} — ${TITLE} Ready!",
               "url": "${RELEASE_URL}",
-              "description": "Release is ready!\n\n[**⬇️ Download kodex-${VERSION}-windows.zip**](${DOWNLOAD_URL})",
-              "color": 5763719,
+              "description": "[**⬇️ Download kodex-${VERSION}-windows.zip**](${DOWNLOAD_URL})",
+              "color": ${COLOR},
               "footer": {"text": "Kodex CI"},
               "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
             }]
