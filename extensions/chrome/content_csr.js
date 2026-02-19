@@ -8,7 +8,7 @@
  *   - customer_id, agent_id, account_id, persona_id, tilia_wallet_id, real_name
  * Additional fields from page content:
  *   - avatar_name (from header), email, display_name, account_status, etc.
- * From Security Questions dialog (when opened):
+ * From Security Questions dialog (when manually opened):
  *   - security_question (question only, not answer)
  */
 
@@ -51,18 +51,50 @@
   /**
    * Get value from main content tables (Useful Info, All Fields sections)
    * Structure: <tr><th>Label</th><td>Value</td></tr>
+   * 
+   * @param {string} labelText - Exact label to match (case-insensitive)
+   * @param {boolean} exactMatch - If true, require exact match; if false, use startsWith
+   * @param {boolean} firstTextOnly - If true, return only the first text node (ignore links/buttons)
    */
-  function getTableValue(labelText) {
+  function getTableValue(labelText, exactMatch = true, firstTextOnly = false) {
     const tables = document.querySelectorAll("table.data.side_by_side");
+    const searchLabel = labelText.toLowerCase();
+    
     for (const table of tables) {
       const rows = table.querySelectorAll("tr");
       for (const row of rows) {
         const th = row.querySelector("th");
         const td = row.querySelector("td");
         if (th && td) {
-          const label = th.textContent.trim();
-          if (label.toLowerCase().includes(labelText.toLowerCase())) {
-            // Check for link inside
+          const label = th.textContent.trim().toLowerCase();
+          
+          // Check for match
+          const matches = exactMatch 
+            ? label === searchLabel
+            : label.startsWith(searchLabel);
+          
+          if (matches) {
+            if (firstTextOnly) {
+              // Get only direct text content, not from child elements
+              // This handles cases like "0.00    Settle" where Settle is a link
+              const textNodes = [];
+              for (const node of td.childNodes) {
+                if (node.nodeType === Node.TEXT_NODE) {
+                  const text = node.textContent.trim();
+                  if (text) textNodes.push(text);
+                }
+              }
+              if (textNodes.length > 0) {
+                return textNodes[0];
+              }
+              // Fallback to first child text if no direct text nodes
+              const firstChild = td.firstChild;
+              if (firstChild && firstChild.nodeType === Node.TEXT_NODE) {
+                return firstChild.textContent.trim();
+              }
+            }
+            
+            // Check for link inside (for things like Registration IP that are links)
             const link = td.querySelector("a");
             if (link) {
               return link.textContent.trim();
@@ -133,34 +165,60 @@
     const realName = getCustomerInfoValue("Real Name");
 
     // ── From page header ──
-    // Header format: "Klyde.Linden - Summary"
+    // Header format: "Coxinel.Takeda - Summary"
     const headerText = getText("#global-header h2");
     let avatarName = null;
     if (headerText) {
-      const match = headerText.match(/^([^\s-]+)/);
+      const match = headerText.match(/^(.+?)\s*-\s*Summary/i);
       if (match) {
-        avatarName = match[1];
+        avatarName = match[1].trim();
       }
     }
 
-    // ── From content tables ──
-    const displayName = getTableValue("Display Name");
-    const email = getTableValue("Email");
-    const accountStatus = getTableValue("Account Status");
-    const accountType = getTableValue("Account Type");
-    const serviceLevel = getTableValue("Default Service Level");
-    const lindenBalance = getTableValue("L$ Balance");
-    const usdBalance = getTableValue("US Dollar Balance");
-    const lastLogin = getTableValue("Last Login");
-    const createdDate = getTableValue("Created Date");
+    // ── From content tables (exact matching to avoid wrong fields) ──
+    const displayName = getTableValue("display name");
+    const email = getTableValue("email");
+    
+    // Account Status - exact match to avoid "Vivox Account Status"
+    const accountStatus = getTableValue("account status");
+    
+    const accountType = getTableValue("account type");
+    
+    // Default Service Level (membership type: Premium/Base/Premium Plus)
+    const serviceLevel = getTableValue("default service level");
+    
+    // L$ Balance
+    const lindenBalance = getTableValue("l$ balance");
+    
+    // US Dollar Balance - get first text only to avoid "Settle" link
+    const usdBalance = getTableValue("us dollar balance", true, true);
+    
+    // USD Balance Due - get first text only to avoid "Adjust" / "Waive" links
+    const usdBalDue = getTableValue("usd balance due", true, true);
+    
+    // KYC Status
+    const kycStatus = getTableValue("kyc status");
+    
+    // Registration IP
+    const regIp = getTableValue("registration ip");
+    
+    // Tilia Payout Block (Yes/No)
+    const tiliaPayoutBlock = getTableValue("tilia payout block");
+    
+    // MFA Status (Yes/No)
+    const mfaStatus = getTableValue("mfa status");
+    
+    // Other fields
+    const lastLogin = getTableValue("last login");
+    const createdDate = getTableValue("created date");
 
-    // Also grab from "resident" link if available
+    // Also grab avatar name from "resident" link if not found in header
     const residentLink = document.querySelector(".resident a.type-person");
     if (!avatarName && residentLink) {
       avatarName = residentLink.textContent.trim();
     }
     
-    // ── Security question (from cache or dialog) ──
+    // ── Security question (from cache or dialog if open) ──
     const securityQuestion = cachedSecurityQuestion || extractSecurityQuestion();
 
     return {
@@ -184,10 +242,19 @@
       account_type: accountType,
       service_level: serviceLevel,
       security_question: securityQuestion,
+      mfa_status: mfaStatus,
+      kyc_status: kycStatus,
       
       // Balances
       linden_balance: lindenBalance,
       usd_balance: usdBalance,
+      usd_bal_due: usdBalDue,
+      
+      // Tilia
+      tilia_payout_block: tiliaPayoutBlock,
+      
+      // Registration
+      reg_ip: regIp,
       
       // Dates
       last_login: lastLogin,
@@ -245,9 +312,7 @@
   }
 
   // ── Watch for Security Questions dialog ────────────────────────────────────
-  
-  // Track if we auto-opened the dialog (so we know to auto-close it)
-  let autoOpenedDialog = false;
+  // (User manually opens it; we capture when it appears)
   
   const observer = new MutationObserver((mutations) => {
     for (const mutation of mutations) {
@@ -270,16 +335,6 @@
                   console.log("[Kodex/CSR] Captured security question:", question);
                   cachedSecurityQuestion = question;
                   maybeSend(true);
-                  
-                  // If we auto-opened this dialog, close it automatically
-                  if (autoOpenedDialog) {
-                    autoOpenedDialog = false;
-                    const closeBtn = dialog.querySelector(".ui-dialog-titlebar-close");
-                    if (closeBtn) {
-                      console.log("[Kodex/CSR] Auto-closing Security Questions dialog");
-                      closeBtn.click();
-                    }
-                  }
                 }
               }, 200);
             }
@@ -295,33 +350,9 @@
     subtree: true,
   });
 
-  // ── Auto-fetch Security Question ───────────────────────────────────────────
-  
-  function autoFetchSecurityQuestion() {
-    // Don't fetch if we already have it cached
-    if (cachedSecurityQuestion) {
-      console.log("[Kodex/CSR] Security question already cached, skipping auto-fetch");
-      return;
-    }
-    
-    // Find the clickable element
-    const clickable = document.querySelector("td.edit-security-questions.clickable");
-    if (!clickable) {
-      console.log("[Kodex/CSR] Security question element not found on page");
-      return;
-    }
-    
-    console.log("[Kodex/CSR] Auto-clicking Security Questions to fetch...");
-    autoOpenedDialog = true;
-    clickable.click();
-  }
-
   // ── Run on page load ───────────────────────────────────────────────────────
   
   maybeSend();
-  
-  // Auto-fetch security question after page loads (delay for DOM ready)
-  setTimeout(autoFetchSecurityQuestion, 1000);
 
   // Watch for SPA navigation
   let lastUrl = window.location.href;
@@ -332,8 +363,6 @@
       lastSentQuestion = null;
       cachedSecurityQuestion = null;
       setTimeout(maybeSend, 500);
-      // Also auto-fetch security question for new customer
-      setTimeout(autoFetchSecurityQuestion, 1500);
     }
   }, 500);
 
