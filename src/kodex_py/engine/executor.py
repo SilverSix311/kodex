@@ -89,22 +89,11 @@ def execute(
 
     text = substitute(text, prompt_value=prompt_value)
 
-    # ── cursor positioning (%cursor%) ────────────────────────────────
-    return_to = 0
-    if "%cursor%" in text:
-        cursor_pos = text.index("%cursor%")
-        text = text.replace("%cursor%", "")
-        return_to = len(text) - cursor_pos
-
     # ── inject ──────────────────────────────────────────────────────
     if send_mode == SendMode.DIRECT:
         sender.type_text(text)
-        if return_to > 0:
-            sender.move_cursor_left(return_to)
     else:
         sender.paste_text(text)
-        if return_to > 0:
-            sender.move_cursor_left(return_to)
 
     # ── stats callback ──────────────────────────────────────────────
     if stats_fn:

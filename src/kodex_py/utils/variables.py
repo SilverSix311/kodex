@@ -7,7 +7,6 @@ Tokens (evaluated at expansion time):
     %date_short%  — short date   (e.g. "1/29/2026")
     %date_long%   — long date    (e.g. "January 29, 2026")
     %prompt%      — user prompt  (caller must supply the value)
-    %cursor%      — cursor position marker (handled by the executor, not here)
     %name%        — global/ticket variable (see global_variables.py)
 """
 
@@ -31,11 +30,8 @@ def substitute(
     is present and *prompt_value* is ``None``, it is left as-is (the caller 
     should have already prompted the user).
 
-    ``%cursor%`` is **not** stripped here — the executor needs to see it to
-    calculate cursor offset.
-
     Global/ticket variables (``%var_name%``) are also substituted.
-    Priority: freshdesk_context > global_variables
+    Priority: context files > global_variables
     """
     now = now or datetime.now()
 

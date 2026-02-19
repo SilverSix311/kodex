@@ -602,7 +602,7 @@ class ViewVariablesDialog:
     """Read-only dialog that shows all available Kodex variables.
 
     Sections:
-      1. Built-in variables  (%clipboard%, %time%, %date_short%, etc.)
+      1. Built-in variables  (%clipboard%, %time%, %prompt%, etc.)
       2. Ticket Context      (freshdesk_context.json, csr_context.json, gt3_context.json)
       3. Global Variables    (global_variables.json)
     """
@@ -614,7 +614,6 @@ class ViewVariablesDialog:
         ("%date_short%", "Short date (e.g., 1/29/2026)"),
         ("%date_long%",  "Long date (e.g., January 29, 2026)"),
         ("%prompt%",     "Prompt — asks user for input"),
-        ("%cursor%",     "Cursor position after expansion"),
     ]
 
     # Colours reused from parent module
