@@ -25,6 +25,8 @@ import os
 import signal
 import struct
 import sys
+import threading
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -272,6 +274,94 @@ def _write_message(stdout, payload: dict) -> None:
     stdout.flush()
 
 
+# ── Parent process watchdog ────────────────────────────────────────────────────
+
+_shutdown_flag = threading.Event()
+
+
+def _get_parent_pid() -> int | None:
+    """Get the parent process ID."""
+    try:
+        if sys.platform == "win32":
+            import ctypes
+            from ctypes import wintypes
+            
+            kernel32 = ctypes.windll.kernel32
+            
+            # Get current process handle
+            current_process = kernel32.GetCurrentProcess()
+            
+            # PROCESS_BASIC_INFORMATION structure
+            class PROCESS_BASIC_INFORMATION(ctypes.Structure):
+                _fields_ = [
+                    ("Reserved1", ctypes.c_void_p),
+                    ("PebBaseAddress", ctypes.c_void_p),
+                    ("Reserved2", ctypes.c_void_p * 2),
+                    ("UniqueProcessId", ctypes.POINTER(ctypes.c_ulong)),
+                    ("InheritedFromUniqueProcessId", ctypes.POINTER(ctypes.c_ulong)),
+                ]
+            
+            # Simpler approach: use os.getppid() which works on Python 3.2+
+            return os.getppid()
+        else:
+            return os.getppid()
+    except Exception as e:
+        log.warning("Could not get parent PID: %s", e)
+        return None
+
+
+def _is_process_alive(pid: int) -> bool:
+    """Check if a process with the given PID is still running."""
+    if pid is None:
+        return True  # Assume alive if we can't check
+    
+    try:
+        if sys.platform == "win32":
+            import ctypes
+            kernel32 = ctypes.windll.kernel32
+            
+            SYNCHRONIZE = 0x00100000
+            PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+            
+            handle = kernel32.OpenProcess(
+                SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION, 
+                False, 
+                pid
+            )
+            
+            if handle == 0:
+                # Process doesn't exist or can't access
+                return False
+            
+            # Check if process has exited
+            WAIT_TIMEOUT = 258
+            result = kernel32.WaitForSingleObject(handle, 0)
+            kernel32.CloseHandle(handle)
+            
+            return result == WAIT_TIMEOUT  # Still running
+        else:
+            os.kill(pid, 0)  # Doesn't actually kill, just checks existence
+            return True
+    except (OSError, ProcessLookupError):
+        return False
+    except Exception as e:
+        log.warning("Error checking parent process: %s", e)
+        return True  # Assume alive on error
+
+
+def _watchdog_thread(parent_pid: int, check_interval: float = 2.0) -> None:
+    """Background thread that monitors parent process and triggers shutdown."""
+    log.debug("Watchdog started, monitoring parent PID %d", parent_pid)
+    
+    while not _shutdown_flag.is_set():
+        if not _is_process_alive(parent_pid):
+            log.info("Parent process (PID %d) is gone. Triggering shutdown.", parent_pid)
+            _shutdown_flag.set()
+            # Force exit since stdin.read() is blocking
+            os._exit(0)
+        time.sleep(check_interval)
+
+
 # ── Main loop ──────────────────────────────────────────────────────────────────
 
 def run() -> None:
@@ -289,6 +379,19 @@ def run() -> None:
         msvcrt.setmode(sys.stdin.fileno(), os.O_BINARY)
         msvcrt.setmode(sys.stdout.fileno(), os.O_BINARY)
         log.debug("Windows: set stdin/stdout to binary mode")
+
+    # Start parent process watchdog (Windows workaround for pipe EOF issues)
+    parent_pid = _get_parent_pid()
+    if parent_pid:
+        log.info("Parent PID: %d — starting watchdog", parent_pid)
+        watchdog = threading.Thread(
+            target=_watchdog_thread, 
+            args=(parent_pid,), 
+            daemon=True
+        )
+        watchdog.start()
+    else:
+        log.warning("Could not determine parent PID — watchdog disabled")
 
     # Use raw binary I/O — critical for native messaging protocol correctness.
     # DO NOT wrap in TextIOWrapper; the 4-byte length prefix is binary.
