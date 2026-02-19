@@ -36,7 +36,7 @@ class PreferencesWindow:
 
         win = ctk.CTkToplevel(self._parent)
         win.title("Kodex — Preferences")
-        win.geometry("520x480")
+        win.geometry("520x520")
         win.resizable(False, False)
         win.grab_set()
         win.lift()
@@ -66,12 +66,16 @@ class PreferencesWindow:
         total_hs = len(self.db.get_hotstrings())
         total_bundles = len(self.db.get_bundles())
 
+        # ── Bottom buttons (pack first so they're always visible) ──
+        btn_row = ctk.CTkFrame(win, fg_color="transparent")
+        btn_row.pack(side="bottom", fill="x", padx=16, pady=(8, 16))
+
         # ── Tabs ──
         outer = ctk.CTkFrame(win, fg_color="transparent")
-        outer.pack(fill="both", expand=True, padx=16, pady=(16, 8))
+        outer.pack(fill="both", expand=True, padx=16, pady=(16, 0))
 
         tabview = ctk.CTkTabview(outer)
-        tabview.pack(fill="both", expand=True, pady=(0, 12))
+        tabview.pack(fill="both", expand=True)
 
         # ── General Tab ──
         gen = tabview.add("General")
@@ -172,10 +176,7 @@ class PreferencesWindow:
         _stat_row("Characters saved:", f"{chars:,}")
         _stat_row("Hours saved:", f"{hours:.1f}")
 
-        # ── Bottom buttons ──
-        btn_row = ctk.CTkFrame(win, fg_color="transparent")
-        btn_row.pack(fill="x", padx=16, pady=(0, 16))
-
+        # ── Button callbacks and creation ──
         def _on_save():
             cfg.hotkey_create = hk_create_var.get()
             cfg.hotkey_manage = hk_manage_var.get()
@@ -197,6 +198,7 @@ class PreferencesWindow:
 
         win.bind("<Escape>", lambda _: _on_cancel())
 
+        # Add buttons to btn_row (which was packed earlier)
         ctk.CTkButton(btn_row, text="Cancel", command=_on_cancel, width=80).pack(
             side="left", padx=(0, 8)
         )
