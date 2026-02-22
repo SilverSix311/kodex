@@ -17,6 +17,13 @@
 
   const SOURCE = "csr";
   
+  // ── Timing configuration ───────────────────────────────────────────────────
+  // Delays ensure page content is fully loaded before extraction
+  const INITIAL_DELAY_MS = 800;      // Wait after page load before first extraction
+  const FOCUS_DELAY_MS = 500;        // Wait after tab focus/visibility change
+  const SPA_NAV_DELAY_MS = 800;      // Wait after SPA navigation detected
+  const DEBOUNCE_MS = 300;           // Debounce multiple rapid triggers
+  
   // Cache for security question (persists until page reload)
   let cachedSecurityQuestion = null;
 
@@ -306,7 +313,7 @@
       }
       console.log("[Kodex/CSR] Sending context:", context);
       sendContext(context);
-    }, 300);
+    }, DEBOUNCE_MS);
   }
 
   // ── Watch for Security Questions dialog ────────────────────────────────────
@@ -349,8 +356,9 @@
   });
 
   // ── Run on page load ───────────────────────────────────────────────────────
+  // Delay initial extraction to ensure page content is fully rendered
   
-  maybeSend();
+  setTimeout(maybeSend, INITIAL_DELAY_MS);
 
   // Watch for SPA navigation
   let lastUrl = window.location.href;
@@ -360,7 +368,7 @@
       lastSentUrl = null;
       lastSentQuestion = null;
       cachedSecurityQuestion = null;
-      setTimeout(maybeSend, 500);
+      setTimeout(maybeSend, SPA_NAV_DELAY_MS);
     }
   }, 500);
 
@@ -374,13 +382,13 @@
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "visible") {
       console.log("[Kodex/CSR] Tab became visible, refreshing context");
-      setTimeout(forceSend, 100);
+      setTimeout(forceSend, FOCUS_DELAY_MS);
     }
   });
 
   window.addEventListener("focus", () => {
     console.log("[Kodex/CSR] Window focused, refreshing context");
-    setTimeout(forceSend, 100);
+    setTimeout(forceSend, FOCUS_DELAY_MS);
   });
 
   console.log("[Kodex/CSR] Content script loaded on", window.location.href);

@@ -12,6 +12,13 @@
   "use strict";
 
   const SOURCE = "gt3";
+  
+  // ── Timing configuration ───────────────────────────────────────────────────
+  // Delays ensure page content is fully loaded before extraction
+  const INITIAL_DELAY_MS = 800;      // Wait after page load before first extraction
+  const FOCUS_DELAY_MS = 500;        // Wait after tab focus/visibility change
+  const SPA_NAV_DELAY_MS = 800;      // Wait after SPA navigation detected
+  const DEBOUNCE_MS = 800;           // Debounce multiple rapid triggers
 
   // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -224,11 +231,13 @@
       lastSentUrl = currentUrl;
       console.log("[Kodex/GT3] Sending context:", context);
       sendContext(context);
-    }, 800);
+    }, DEBOUNCE_MS);
   }
 
-  // Run on page load
-  maybeSend();
+  // ── Run on page load ───────────────────────────────────────────────────────
+  // Delay initial extraction to ensure page content is fully rendered
+  
+  setTimeout(maybeSend, INITIAL_DELAY_MS);
 
   // Watch for SPA navigation
   let lastUrl = window.location.href;
@@ -236,7 +245,7 @@
     if (window.location.href !== lastUrl) {
       lastUrl = window.location.href;
       lastSentUrl = null;
-      setTimeout(maybeSend, 500);
+      setTimeout(maybeSend, SPA_NAV_DELAY_MS);
     }
   }, 500);
 
@@ -250,13 +259,13 @@
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "visible") {
       console.log("[Kodex/GT3] Tab became visible, refreshing context");
-      setTimeout(forceSend, 100);
+      setTimeout(forceSend, FOCUS_DELAY_MS);
     }
   });
 
   window.addEventListener("focus", () => {
     console.log("[Kodex/GT3] Window focused, refreshing context");
-    setTimeout(forceSend, 100);
+    setTimeout(forceSend, FOCUS_DELAY_MS);
   });
 
   console.log("[Kodex/GT3] Content script loaded on", window.location.href);

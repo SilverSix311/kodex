@@ -17,6 +17,13 @@
   "use strict";
 
   const SOURCE = "freshdesk";
+  
+  // ── Timing configuration ───────────────────────────────────────────────────
+  // Delays ensure page content is fully loaded before extraction
+  const INITIAL_DELAY_MS = 800;      // Wait after page load before first extraction
+  const FOCUS_DELAY_MS = 500;        // Wait after tab focus/visibility change
+  const SPA_NAV_DELAY_MS = 800;      // Wait after SPA navigation detected
+  const DEBOUNCE_MS = 800;           // Debounce multiple rapid triggers
 
   // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -127,11 +134,13 @@
       lastSentTicket = context.ticket_number;
       console.log("[Kodex/Freshdesk] Sending context for ticket", context.ticket_number, context);
       sendContext(context);
-    }, 800);
+    }, DEBOUNCE_MS);
   }
 
-  // Run on page load
-  maybeSend();
+  // ── Run on page load ───────────────────────────────────────────────────────
+  // Delay initial extraction to ensure page content is fully rendered
+  
+  setTimeout(maybeSend, INITIAL_DELAY_MS);
 
   // Watch for SPA navigation (Freshdesk is a single-page app)
   // MutationObserver on the body catches route changes that update the DOM
@@ -150,7 +159,7 @@
     if (window.location.href !== lastUrl) {
       lastUrl = window.location.href;
       lastSentTicket = null; // Reset so the new ticket gets sent
-      setTimeout(maybeSend, 500); // Wait for DOM to update
+      setTimeout(maybeSend, SPA_NAV_DELAY_MS); // Wait for DOM to update
     }
   }, 500);
 
@@ -166,14 +175,14 @@
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "visible") {
       console.log("[Kodex/Freshdesk] Tab became visible, refreshing context");
-      setTimeout(forceSend, 100);
+      setTimeout(forceSend, FOCUS_DELAY_MS);
     }
   });
 
   // Window gains focus (user clicks into browser from another app)
   window.addEventListener("focus", () => {
     console.log("[Kodex/Freshdesk] Window focused, refreshing context");
-    setTimeout(forceSend, 100);
+    setTimeout(forceSend, FOCUS_DELAY_MS);
   });
 
   console.log("[Kodex/Freshdesk] Content script loaded on", window.location.href);
