@@ -106,15 +106,46 @@ def _write_context(payload: dict) -> None:
 
 
 # ── Time tracking ──────────────────────────────────────────────────────────────
+# 
+# Structure (date-based):
+# {
+#   "entries": {
+#     "2026-02-22": {
+#       "12345": {"total_seconds": 6000, "source": "freshdesk", "last_seen": "..."},
+#       "12346": {"total_seconds": 3000, "source": "freshdesk", "last_seen": "..."}
+#     },
+#     "2026-02-21": {
+#       "12345": {"total_seconds": 1000, "source": "freshdesk", "last_seen": "..."}
+#     }
+#   },
+#   "_active": {"ticket_number": "12345", "source": "freshdesk", "started_at": "..."}
+# }
 
 def _load_time_tracking() -> dict:
     """Load time_tracking.json, returning an empty structure if absent/corrupt."""
     if TIME_TRACKING_FILE.exists():
         try:
-            return json.loads(TIME_TRACKING_FILE.read_text(encoding="utf-8"))
+            data = json.loads(TIME_TRACKING_FILE.read_text(encoding="utf-8"))
+            # Migrate old format if needed
+            if "tickets" in data and "entries" not in data:
+                data = _migrate_time_tracking(data)
+            return data
         except (json.JSONDecodeError, OSError) as e:
             log.warning("Could not read time_tracking.json: %s", e)
-    return {"tickets": {}, "_active": None}
+    return {"entries": {}, "_active": None}
+
+
+def _migrate_time_tracking(old_data: dict) -> dict:
+    """Migrate from old flat format to date-based format."""
+    today = datetime.now().strftime("%Y-%m-%d")
+    new_data = {"entries": {today: {}}, "_active": old_data.get("_active")}
+    
+    old_tickets = old_data.get("tickets", {})
+    for ticket_num, info in old_tickets.items():
+        new_data["entries"][today][ticket_num] = info
+    
+    log.info("Migrated time_tracking.json to date-based format (%d tickets)", len(old_tickets))
+    return new_data
 
 
 def _save_time_tracking(data: dict) -> None:
@@ -132,19 +163,26 @@ def _save_time_tracking(data: dict) -> None:
 def _update_time_tracking(payload: dict) -> None:
     """Update time_tracking.json based on incoming context payload.
 
+    Time is tracked per-date — same ticket on different days = separate entries.
+    
     Logic:
-    - If there's a currently active ticket, accumulate elapsed seconds.
+    - If there's a currently active ticket, accumulate elapsed seconds for TODAY.
     - If the same ticket is still active, update last_seen but keep started_at.
     - If a new ticket (or no ticket) arrives, finalize the old entry and set new _active.
     """
     data = _load_time_tracking()
     now_str = datetime.now().isoformat()
     now_dt = datetime.now()
+    today = now_dt.strftime("%Y-%m-%d")
 
     source = payload.get("source", "unknown")
     incoming_ticket = payload.get("ticket_number")  # May be None
 
     active = data.get("_active")  # None or dict
+    
+    # Ensure today's entry dict exists
+    if today not in data.get("entries", {}):
+        data.setdefault("entries", {})[today] = {}
 
     # ── Finalize the previously active ticket (if any) ─────────────────────────
     if active:
@@ -166,14 +204,13 @@ def _update_time_tracking(payload: dict) -> None:
             )
 
             if same_ticket:
-                # Same ticket still open — do NOT reset started_at; just update last_seen.
-                ticket_entry = data["tickets"].setdefault(prev_ticket, {
+                # Same ticket still open — accumulate time for TODAY
+                today_entries = data["entries"].setdefault(today, {})
+                ticket_entry = today_entries.setdefault(prev_ticket, {
                     "total_seconds": 0,
                     "source": prev_source,
                     "last_seen": now_str,
                 })
-                # Add only the elapsed portion up to now, then restart the clock
-                # so the next update doesn't double-count.
                 ticket_entry["total_seconds"] = ticket_entry.get("total_seconds", 0) + elapsed
                 ticket_entry["last_seen"] = now_str
                 # Reset started_at to now so we don't double-count on next update.
@@ -181,7 +218,7 @@ def _update_time_tracking(payload: dict) -> None:
                 data["_active"] = active
 
                 log.debug(
-                    "Same ticket %s still active; accumulated %.1fs (total=%.1fs)",
+                    "Same ticket %s still active; accumulated %.1fs (today total=%.1fs)",
                     prev_ticket, elapsed, ticket_entry["total_seconds"],
                 )
 
@@ -189,8 +226,9 @@ def _update_time_tracking(payload: dict) -> None:
                 return  # Nothing more to do
 
             else:
-                # Different ticket (or ticket cleared) — finalize previous entry.
-                ticket_entry = data["tickets"].setdefault(prev_ticket, {
+                # Different ticket (or ticket cleared) — finalize previous entry for TODAY
+                today_entries = data["entries"].setdefault(today, {})
+                ticket_entry = today_entries.setdefault(prev_ticket, {
                     "total_seconds": 0,
                     "source": prev_source,
                     "last_seen": now_str,
@@ -198,14 +236,15 @@ def _update_time_tracking(payload: dict) -> None:
                 ticket_entry["total_seconds"] = ticket_entry.get("total_seconds", 0) + elapsed
                 ticket_entry["last_seen"] = now_str
                 log.info(
-                    "Finalized ticket %s (source=%s): added %.1fs, total=%.1fs",
+                    "Finalized ticket %s (source=%s): added %.1fs, today total=%.1fs",
                     prev_ticket, prev_source, elapsed, ticket_entry["total_seconds"],
                 )
 
     # ── Set the new active ticket ──────────────────────────────────────────────
     if incoming_ticket:
-        # Ensure an entry exists in tickets
-        data["tickets"].setdefault(incoming_ticket, {
+        # Ensure an entry exists for today
+        today_entries = data["entries"].setdefault(today, {})
+        today_entries.setdefault(incoming_ticket, {
             "total_seconds": 0,
             "source": source,
             "last_seen": now_str,

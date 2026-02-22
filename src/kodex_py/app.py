@@ -63,6 +63,7 @@ class KodexApp:
         self._input_monitor = None
         self.tracker = None  # TicketTracker instance
         self.global_vars = None  # GlobalVariables instance
+        self.time_scheduler = None  # TimeTrackingScheduler instance
 
     # ── lifecycle ───────────────────────────────────────────────────
 
@@ -119,6 +120,15 @@ class KodexApp:
         except Exception:
             log.warning("Failed to initialise global variables", exc_info=True)
 
+        # Time tracking scheduler (daily export at 5:50 PM, Monday archive)
+        try:
+            from kodex_py.plugins.time_scheduler import TimeTrackingScheduler
+            self.time_scheduler = TimeTrackingScheduler(data_dir=self.db_path.parent)
+            self.time_scheduler.start()
+            log.info("Time tracking scheduler initialised")
+        except Exception:
+            log.warning("Failed to initialise time tracking scheduler", exc_info=True)
+
         # Input monitor
         from kodex_py.engine.input_monitor import InputMonitor
         self._input_monitor = InputMonitor(self.matcher, self._on_match)
@@ -136,6 +146,8 @@ class KodexApp:
             self._input_monitor._kb_listener.join()
 
     def stop(self) -> None:
+        if self.time_scheduler:
+            self.time_scheduler.stop()
         if self.global_vars:
             self.global_vars.stop_watching()
         if self.tracker and self.tracker.is_tracking:

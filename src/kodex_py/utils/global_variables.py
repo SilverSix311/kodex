@@ -177,14 +177,24 @@ class GlobalVariables:
     # ── Time tracking helpers ───────────────────────────────────────
 
     def _get_ticket_time_seconds(self) -> float | None:
-        """Return total seconds for the currently active ticket, or None."""
+        """Return total seconds for the currently active ticket (today only), or None."""
         active = self._time_tracking.get("_active")
         if not active:
             return None
         ticket_number = active.get("ticket_number")
         if not ticket_number:
             return None
-        ticket_entry = self._time_tracking.get("tickets", {}).get(ticket_number, {})
+        
+        # New date-based structure: entries[date][ticket_number]
+        today = datetime.now().strftime("%Y-%m-%d")
+        entries = self._time_tracking.get("entries", {})
+        today_entries = entries.get(today, {})
+        ticket_entry = today_entries.get(ticket_number, {})
+        
+        # Fallback to old structure for backward compatibility
+        if not ticket_entry and "tickets" in self._time_tracking:
+            ticket_entry = self._time_tracking.get("tickets", {}).get(ticket_number, {})
+        
         return float(ticket_entry.get("total_seconds", 0))
 
     # ── Variable CRUD ───────────────────────────────────────────────
