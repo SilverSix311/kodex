@@ -121,6 +121,75 @@ def _write_context(payload: dict) -> None:
 #   "_active": {"ticket_number": "12345", "source": "freshdesk", "started_at": "..."}
 # }
 
+# Time tracking cutoff (don't track after this time)
+TRACKING_CUTOFF_HOUR = 17  # 5 PM
+TRACKING_CUTOFF_MINUTE = 50  # 5:50 PM
+
+
+def _is_workstation_locked() -> bool:
+    """Check if the Windows workstation is locked.
+    
+    Returns True if locked, False if unlocked or if detection fails.
+    """
+    if sys.platform != "win32":
+        return False
+    
+    try:
+        import ctypes
+        from ctypes import wintypes
+        
+        user32 = ctypes.windll.user32
+        
+        # Method 1: Check for the Winlogon desktop (most reliable)
+        # GetForegroundWindow returns NULL when locked
+        hwnd = user32.GetForegroundWindow()
+        if hwnd == 0:
+            return True
+        
+        # Method 2: Check the input desktop name
+        # When locked, the input desktop is "Winlogon" instead of "Default"
+        # This requires more complex API calls, so we'll use a simpler approach
+        
+        # Method 3: OpenInputDesktop fails when workstation is locked
+        DESKTOP_SWITCHDESKTOP = 0x0100
+        hdesk = user32.OpenInputDesktop(0, False, DESKTOP_SWITCHDESKTOP)
+        if hdesk == 0:
+            # Failed to open input desktop - likely locked
+            return True
+        
+        # Successfully opened desktop - not locked
+        user32.CloseDesktop(hdesk)
+        return False
+        
+    except Exception as e:
+        log.debug("Lock detection failed: %s", e)
+        return False  # Assume not locked if we can't detect
+
+
+def _is_past_tracking_cutoff() -> bool:
+    """Check if current time is past the tracking cutoff (5:50 PM)."""
+    now = datetime.now()
+    return (now.hour > TRACKING_CUTOFF_HOUR or 
+            (now.hour == TRACKING_CUTOFF_HOUR and now.minute >= TRACKING_CUTOFF_MINUTE))
+
+
+def _should_track_time() -> bool:
+    """Check if we should be tracking time right now.
+    
+    Returns False if:
+    - Workstation is locked (AFK)
+    - Current time is past 5:50 PM (shift ended)
+    """
+    if _is_workstation_locked():
+        log.debug("Workstation locked — not tracking time")
+        return False
+    
+    if _is_past_tracking_cutoff():
+        log.debug("Past tracking cutoff (5:50 PM) — not tracking time")
+        return False
+    
+    return True
+
 def _load_time_tracking() -> dict:
     """Load time_tracking.json, returning an empty structure if absent/corrupt."""
     if TIME_TRACKING_FILE.exists():
@@ -165,6 +234,10 @@ def _update_time_tracking(payload: dict) -> None:
 
     Time is tracked per-date — same ticket on different days = separate entries.
     
+    Time is NOT accumulated if:
+    - Workstation is locked (AFK detection)
+    - Current time is past 5:50 PM (shift ended)
+    
     Logic:
     - If there's a currently active ticket, accumulate elapsed seconds for TODAY.
     - If the same ticket is still active, update last_seen but keep started_at.
@@ -179,6 +252,9 @@ def _update_time_tracking(payload: dict) -> None:
     incoming_ticket = payload.get("ticket_number")  # May be None
 
     active = data.get("_active")  # None or dict
+    
+    # Check if we should be tracking time (not locked, not past 5:50 PM)
+    should_track = _should_track_time()
     
     # Ensure today's entry dict exists
     if today not in data.get("entries", {}):
@@ -204,41 +280,55 @@ def _update_time_tracking(payload: dict) -> None:
             )
 
             if same_ticket:
-                # Same ticket still open — accumulate time for TODAY
-                today_entries = data["entries"].setdefault(today, {})
-                ticket_entry = today_entries.setdefault(prev_ticket, {
-                    "total_seconds": 0,
-                    "source": prev_source,
-                    "last_seen": now_str,
-                })
-                ticket_entry["total_seconds"] = ticket_entry.get("total_seconds", 0) + elapsed
-                ticket_entry["last_seen"] = now_str
+                # Same ticket still open
+                # Only accumulate time if we should be tracking
+                if should_track and elapsed > 0:
+                    today_entries = data["entries"].setdefault(today, {})
+                    ticket_entry = today_entries.setdefault(prev_ticket, {
+                        "total_seconds": 0,
+                        "source": prev_source,
+                        "last_seen": now_str,
+                    })
+                    ticket_entry["total_seconds"] = ticket_entry.get("total_seconds", 0) + elapsed
+                    ticket_entry["last_seen"] = now_str
+                    log.debug(
+                        "Same ticket %s still active; accumulated %.1fs (today total=%.1fs)",
+                        prev_ticket, elapsed, ticket_entry["total_seconds"],
+                    )
+                else:
+                    log.debug(
+                        "Same ticket %s still active; NOT tracking (locked/after hours), skipped %.1fs",
+                        prev_ticket, elapsed,
+                    )
+                
                 # Reset started_at to now so we don't double-count on next update.
                 active["started_at"] = now_str
                 data["_active"] = active
-
-                log.debug(
-                    "Same ticket %s still active; accumulated %.1fs (today total=%.1fs)",
-                    prev_ticket, elapsed, ticket_entry["total_seconds"],
-                )
 
                 _save_time_tracking(data)
                 return  # Nothing more to do
 
             else:
                 # Different ticket (or ticket cleared) — finalize previous entry for TODAY
-                today_entries = data["entries"].setdefault(today, {})
-                ticket_entry = today_entries.setdefault(prev_ticket, {
-                    "total_seconds": 0,
-                    "source": prev_source,
-                    "last_seen": now_str,
-                })
-                ticket_entry["total_seconds"] = ticket_entry.get("total_seconds", 0) + elapsed
-                ticket_entry["last_seen"] = now_str
-                log.info(
-                    "Finalized ticket %s (source=%s): added %.1fs, today total=%.1fs",
-                    prev_ticket, prev_source, elapsed, ticket_entry["total_seconds"],
-                )
+                # Only accumulate if we should be tracking
+                if should_track and elapsed > 0:
+                    today_entries = data["entries"].setdefault(today, {})
+                    ticket_entry = today_entries.setdefault(prev_ticket, {
+                        "total_seconds": 0,
+                        "source": prev_source,
+                        "last_seen": now_str,
+                    })
+                    ticket_entry["total_seconds"] = ticket_entry.get("total_seconds", 0) + elapsed
+                    ticket_entry["last_seen"] = now_str
+                    log.info(
+                        "Finalized ticket %s (source=%s): added %.1fs, today total=%.1fs",
+                        prev_ticket, prev_source, elapsed, ticket_entry["total_seconds"],
+                    )
+                else:
+                    log.debug(
+                        "Finalized ticket %s (source=%s): NOT tracking (locked/after hours), skipped %.1fs",
+                        prev_ticket, prev_source, elapsed,
+                    )
 
     # ── Set the new active ticket ──────────────────────────────────────────────
     if incoming_ticket:

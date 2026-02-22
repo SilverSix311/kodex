@@ -1,9 +1,10 @@
 """Preferences window — mirrors AHK preferences_GUI.ahk.
 
-Three tabs:
+Four tabs:
 - General: hotkeys, send mode, sound, startup
 - Print: cheatsheet generation
 - Stats: expansion statistics
+- Agent Info: agent-specific information for global variables
 """
 
 from __future__ import annotations
@@ -177,6 +178,60 @@ class PreferencesWindow:
         _stat_row("Characters saved:", f"{chars:,}")
         _stat_row("Hours saved:", f"{hours:.1f}")
 
+        # ── Agent Info Tab ──
+        from kodex_py.utils.agent_info import load_agent_info, save_agent_info, AgentInfo
+        
+        agent = tabview.add("Agent Info")
+        agent_inner = ctk.CTkFrame(agent, fg_color="transparent")
+        agent_inner.pack(fill="both", expand=True, padx=8, pady=12)
+        
+        # Load current agent info
+        current_agent = load_agent_info(self.db.db_path.parent if self.db else None)
+        
+        # Agent info variables
+        agent_name_var = tk.StringVar(value=current_agent.name)
+        agent_email_var = tk.StringVar(value=current_agent.email)
+        agent_team_var = tk.StringVar(value=current_agent.team)
+        agent_workdays_var = tk.StringVar(value=current_agent.workdays)
+        agent_shift_var = tk.StringVar(value=current_agent.shift)
+        agent_company_var = tk.StringVar(value=current_agent.company)
+        
+        ctk.CTkLabel(
+            agent_inner,
+            text="Agent Information",
+            font=ctk.CTkFont(size=14, weight="bold"),
+        ).pack(anchor="w", pady=(0, 8))
+        
+        ctk.CTkLabel(
+            agent_inner,
+            text="This information is available as global variables:\n"
+                 "%agent_name%, %agent_email%, %agent_team%, etc.",
+            text_color="gray60",
+            justify="left",
+        ).pack(anchor="w", pady=(0, 12))
+        
+        def _agent_row(label: str, var: tk.StringVar, width: int = 300) -> None:
+            row = ctk.CTkFrame(agent_inner, fg_color="transparent")
+            row.pack(fill="x", pady=3)
+            ctk.CTkLabel(row, text=label, width=120, anchor="w").pack(side="left")
+            ctk.CTkEntry(row, textvariable=var, width=width).pack(side="left", fill="x", expand=True)
+        
+        _agent_row("Agent Name:", agent_name_var)
+        _agent_row("Agent Email:", agent_email_var)
+        _agent_row("Agent Team:", agent_team_var)
+        _agent_row("Workdays:", agent_workdays_var)
+        _agent_row("Shift:", agent_shift_var)
+        _agent_row("Company:", agent_company_var)
+        
+        ctk.CTkLabel(
+            agent_inner,
+            text="Example workdays: Sunday, Monday, Tuesday, Wednesday, Thursday\n"
+                 "Example shift: 9am-6pm",
+            text_color="gray50",
+            font=ctk.CTkFont(size=11),
+            justify="left",
+        ).pack(anchor="w", pady=(12, 0))
+
         # ── Button callbacks and creation ──
         def _on_save():
             cfg.hotkey_create = hk_create_var.get()
@@ -190,6 +245,17 @@ class PreferencesWindow:
             cfg.run_at_startup = startup_var.get()
             cfg.autocorrect_enabled = autocorrect_var.get()
             save_config(self.db, cfg)
+            
+            # Save agent info
+            new_agent = AgentInfo(
+                name=agent_name_var.get(),
+                email=agent_email_var.get(),
+                team=agent_team_var.get(),
+                workdays=agent_workdays_var.get(),
+                shift=agent_shift_var.get(),
+                company=agent_company_var.get(),
+            )
+            save_agent_info(new_agent, self.db.db_path.parent if self.db else None)
             
             # Notify app to reload config
             if self._on_save:

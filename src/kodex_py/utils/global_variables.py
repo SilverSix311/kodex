@@ -239,7 +239,14 @@ class GlobalVariables:
                 return None
             return _seconds_to_hhmmss(secs)
 
-        # ── 4. Global variables ────────────────────────────────────
+        # ── 4. Agent info variables ────────────────────────────────
+        if name.startswith("agent_"):
+            from kodex_py.utils.agent_info import get_agent_variable
+            value = get_agent_variable(name, self._data_dir)
+            if value is not None:
+                return value
+
+        # ── 5. Global variables ────────────────────────────────────
         if name in self._variables:
             return self._variables[name].get("value")
 
