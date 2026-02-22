@@ -95,6 +95,7 @@ def run_tray(app: "KodexApp") -> None:
 
     # ── Cached GUI window instances ──────────────────────────────────
     _management_window: list = [None]   # list so lambda can rebind
+    _time_tracking_window: list = [None]
 
     # ── Helpers ─────────────────────────────────────────────────────
 
@@ -138,6 +139,17 @@ def run_tray(app: "KodexApp") -> None:
                 log.info("Config reloaded — send_mode=%s", app.config.send_mode)
 
             PreferencesWindow(app.db, parent=root, on_save=_on_config_saved).show()
+
+        _schedule(_do)
+
+    def on_time_tracking(icon, item) -> None:
+        def _do():
+            from kodex_py.gui.time_tracking import TimeTrackingWindow
+
+            win = _time_tracking_window[0]
+            if win is None or not win._window or not win._window.winfo_exists():
+                _time_tracking_window[0] = TimeTrackingWindow(parent=root, db=app.db)
+            _time_tracking_window[0].show()
 
         _schedule(_do)
 
@@ -216,6 +228,7 @@ def run_tray(app: "KodexApp") -> None:
         pystray.MenuItem("Preferences…", on_preferences),
         pystray.Menu.SEPARATOR,
         pystray.MenuItem(_tracker_text, on_tracker),
+        pystray.MenuItem("Time Tracking", on_time_tracking),
         pystray.Menu.SEPARATOR,
         pystray.MenuItem(_disable_text, on_disable),
         pystray.Menu.SEPARATOR,
