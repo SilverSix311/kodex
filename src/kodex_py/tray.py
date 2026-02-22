@@ -25,6 +25,16 @@ if TYPE_CHECKING:
 
 log = logging.getLogger(__name__)
 
+
+def _get_version() -> str:
+    """Get Kodex version string."""
+    try:
+        from kodex_py import __version__
+        return __version__
+    except ImportError:
+        return "unknown"
+
+
 # Module-level reference to the hidden CTk root (set by run_tray).
 # Other GUI modules import this to parent their Toplevel windows.
 _tk_root = None
@@ -49,10 +59,20 @@ def run_tray(app: "KodexApp") -> None:
       - Main thread: CTk event loop (blocks here via root.mainloop())
       - Background thread: pystray icon
     """
+    import ctypes
+    import sys
+
     import customtkinter as ctk
     import pystray
 
     global _tk_root
+
+    # ── Set Windows AppUserModelID (enables custom taskbar icon) ─────
+    if sys.platform == "win32":
+        try:
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("hawt.pink.kodex")
+        except Exception:
+            pass  # Not critical if it fails
 
     # ── Configure CustomTkinter ──────────────────────────────────────
     ctk.set_appearance_mode("dark")
@@ -64,6 +84,14 @@ def run_tray(app: "KodexApp") -> None:
     root.title("Kodex")
     root.protocol("WM_DELETE_WINDOW", lambda: None)  # Prevent accidental close
     _tk_root = root
+
+    # ── Set window icon ──────────────────────────────────────────────
+    ico_path = app.db_path.parent / "resources" / "kodex.ico"
+    if ico_path.exists():
+        try:
+            root.iconbitmap(str(ico_path))
+        except Exception:
+            pass  # Fallback to default if icon fails
 
     # ── Cached GUI window instances ──────────────────────────────────
     _management_window: list = [None]   # list so lambda can rebind
@@ -181,7 +209,7 @@ def run_tray(app: "KodexApp") -> None:
 
     # ── pystray menu ────────────────────────────────────────────────
     menu = pystray.Menu(
-        pystray.MenuItem("Kodex v3.0", None, enabled=False),
+        pystray.MenuItem(f"Kodex v{_get_version()}", None, enabled=False),
         pystray.Menu.SEPARATOR,
         pystray.MenuItem("Manage Hotstrings", on_manage),
         pystray.MenuItem("Create New Hotstring", on_new_hotstring),
