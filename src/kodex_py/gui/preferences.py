@@ -83,7 +83,7 @@ class PreferencesWindow:
             from kodex_py.utils.agent_info import load_agent_info, save_agent_info, AgentInfo
             from pathlib import Path
             
-            data_dir = Path(self.db.db_path).parent if self.db and self.db.db_path else None
+            data_dir = Path(self.db.path).parent if self.db and self.db.path else None
             current_agent = load_agent_info(data_dir)
             
             agent_name_var.set(current_agent.name)
