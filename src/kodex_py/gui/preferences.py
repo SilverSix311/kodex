@@ -23,7 +23,7 @@ log = logging.getLogger(__name__)
 
 
 class PreferencesWindow:
-    """Preferences dialog with General / Print / Stats tabs."""
+    """Preferences dialog with General / Print / Stats / Agent Info tabs."""
 
     def __init__(self, db: "Database", parent=None, on_save=None) -> None:
         self.db = db
@@ -38,15 +38,18 @@ class PreferencesWindow:
 
         win = ctk.CTkToplevel(self._parent)
         win.title("Kodex — Preferences")
-        win.geometry("520x520")
-        win.resizable(False, False)
+        win.geometry("550x620")  # Increased size for Agent Info tab
+        win.minsize(500, 550)
         win.grab_set()
         win.lift()
         win.focus_force()
         
         # Set window icon
-        from kodex_py.gui.manager import _set_window_icon
-        _set_window_icon(win, self.db)
+        try:
+            from kodex_py.gui.manager import _set_window_icon
+            _set_window_icon(win, self.db)
+        except Exception as e:
+            log.debug("Could not set window icon: %s", e)
 
         # ── Variables ──
         hk_create_var = tk.StringVar(value=cfg.hotkey_create)
@@ -68,22 +71,53 @@ class PreferencesWindow:
         total_hs = len(self.db.get_hotstrings())
         total_bundles = len(self.db.get_bundles())
 
-        # ── Bottom buttons (pack first so they're always visible) ──
-        btn_row = ctk.CTkFrame(win, fg_color="transparent")
-        btn_row.pack(side="bottom", fill="x", padx=16, pady=(8, 16))
+        # ── Agent Info variables (load early) ──
+        agent_name_var = tk.StringVar(value="")
+        agent_email_var = tk.StringVar(value="")
+        agent_team_var = tk.StringVar(value="")
+        agent_workdays_var = tk.StringVar(value="")
+        agent_shift_var = tk.StringVar(value="")
+        agent_company_var = tk.StringVar(value="")
+        
+        try:
+            from kodex_py.utils.agent_info import load_agent_info, save_agent_info, AgentInfo
+            from pathlib import Path
+            
+            data_dir = Path(self.db.db_path).parent if self.db and self.db.db_path else None
+            current_agent = load_agent_info(data_dir)
+            
+            agent_name_var.set(current_agent.name)
+            agent_email_var.set(current_agent.email)
+            agent_team_var.set(current_agent.team)
+            agent_workdays_var.set(current_agent.workdays)
+            agent_shift_var.set(current_agent.shift)
+            agent_company_var.set(current_agent.company)
+            
+            agent_info_available = True
+        except Exception as e:
+            log.warning("Could not load agent info: %s", e)
+            agent_info_available = False
+            AgentInfo = None
+            save_agent_info = None
+            data_dir = None
 
-        # ── Tabs ──
-        outer = ctk.CTkFrame(win, fg_color="transparent")
-        outer.pack(fill="both", expand=True, padx=16, pady=(16, 0))
+        # ── Main layout ──
+        main_frame = ctk.CTkFrame(win, fg_color="transparent")
+        main_frame.pack(fill="both", expand=True, padx=16, pady=16)
 
-        tabview = ctk.CTkTabview(outer)
+        # Tabs
+        tabview = ctk.CTkTabview(main_frame, height=480)
         tabview.pack(fill="both", expand=True)
 
+        # ══════════════════════════════════════════════════════════════
         # ── General Tab ──
+        # ══════════════════════════════════════════════════════════════
         gen = tabview.add("General")
+        gen_scroll = ctk.CTkScrollableFrame(gen, fg_color="transparent")
+        gen_scroll.pack(fill="both", expand=True)
 
         # Hotkeys section
-        hk_frame = ctk.CTkFrame(gen, corner_radius=6)
+        hk_frame = ctk.CTkFrame(gen_scroll, corner_radius=6)
         hk_frame.pack(fill="x", pady=(8, 8), padx=4)
         ctk.CTkLabel(
             hk_frame, text="Hotkeys", font=ctk.CTkFont(weight="bold"), anchor="w"
@@ -92,8 +126,7 @@ class PreferencesWindow:
         def _hotkey_row(parent, label: str, var: tk.StringVar) -> None:
             row = ctk.CTkFrame(parent, fg_color="transparent")
             row.pack(fill="x", padx=12, pady=2)
-            lbl = ctk.CTkLabel(row, text=label, width=160, anchor="w")
-            lbl.pack(side="left")
+            ctk.CTkLabel(row, text=label, width=160, anchor="w").pack(side="left")
             ctk.CTkEntry(row, textvariable=var, width=180).pack(side="left")
 
         _hotkey_row(hk_frame, "Create hotstring:", hk_create_var)
@@ -103,16 +136,19 @@ class PreferencesWindow:
         ctk.CTkFrame(hk_frame, fg_color="transparent", height=8).pack()
 
         # Send mode section
-        mode_frame = ctk.CTkFrame(gen, corner_radius=6)
+        mode_frame = ctk.CTkFrame(gen_scroll, corner_radius=6)
         mode_frame.pack(fill="x", pady=(0, 8), padx=4)
         ctk.CTkLabel(
             mode_frame, text="Send Mode", font=ctk.CTkFont(weight="bold"), anchor="w"
         ).pack(anchor="w", padx=12, pady=(8, 4))
+        
         mode_row = ctk.CTkFrame(mode_frame, fg_color="transparent")
         mode_row.pack(fill="x", padx=12, pady=(0, 4))
-        ctk.CTkComboBox(
+        mode_combo = ctk.CTkComboBox(
             mode_row, values=["Direct", "Clipboard"], variable=mode_var, width=200
-        ).pack(side="left")
+        )
+        mode_combo.pack(side="left")
+        
         ctk.CTkLabel(
             mode_frame,
             text="Direct = keystroke injection  |  Clipboard = Ctrl+V paste",
@@ -121,8 +157,8 @@ class PreferencesWindow:
         ).pack(anchor="w", padx=12, pady=(0, 8))
 
         # Checkboxes
-        checks_frame = ctk.CTkFrame(gen, fg_color="transparent")
-        checks_frame.pack(fill="x", padx=4)
+        checks_frame = ctk.CTkFrame(gen_scroll, fg_color="transparent")
+        checks_frame.pack(fill="x", padx=4, pady=(0, 8))
         ctk.CTkCheckBox(
             checks_frame, text="Play sound on expansion", variable=sound_var
         ).pack(anchor="w", pady=3)
@@ -133,12 +169,17 @@ class PreferencesWindow:
             checks_frame, text="Enable autocorrect", variable=autocorrect_var
         ).pack(anchor="w", pady=3)
 
+        # ══════════════════════════════════════════════════════════════
         # ── Print Tab ──
+        # ══════════════════════════════════════════════════════════════
         prn = tabview.add("Print")
         prn_inner = ctk.CTkFrame(prn, fg_color="transparent")
         prn_inner.pack(fill="both", expand=True, padx=8, pady=20)
         ctk.CTkLabel(
-            prn_inner, text="Generate a printable HTML cheatsheet\nof all your hotstrings.", anchor="w"
+            prn_inner, 
+            text="Generate a printable HTML cheatsheet\nof all your hotstrings.", 
+            anchor="w",
+            justify="left",
         ).pack(anchor="w", pady=(0, 20))
 
         def _do_cheatsheet():
@@ -159,7 +200,9 @@ class PreferencesWindow:
             anchor="w"
         )
 
+        # ══════════════════════════════════════════════════════════════
         # ── Stats Tab ──
+        # ══════════════════════════════════════════════════════════════
         stats = tabview.add("Stats")
         stats_inner = ctk.CTkFrame(stats, fg_color="transparent")
         stats_inner.pack(fill="both", expand=True, padx=8, pady=12)
@@ -168,9 +211,7 @@ class PreferencesWindow:
             row = ctk.CTkFrame(stats_inner, fg_color="transparent")
             row.pack(fill="x", pady=4)
             ctk.CTkLabel(row, text=label, width=160, anchor="w").pack(side="left")
-            ctk.CTkLabel(
-                row, text=value, text_color="#64C8FF", anchor="w"
-            ).pack(side="left")
+            ctk.CTkLabel(row, text=value, text_color="#64C8FF", anchor="w").pack(side="left")
 
         _stat_row("Hotstrings:", str(total_hs))
         _stat_row("Bundles:", str(total_bundles))
@@ -178,23 +219,12 @@ class PreferencesWindow:
         _stat_row("Characters saved:", f"{chars:,}")
         _stat_row("Hours saved:", f"{hours:.1f}")
 
+        # ══════════════════════════════════════════════════════════════
         # ── Agent Info Tab ──
-        from kodex_py.utils.agent_info import load_agent_info, save_agent_info, AgentInfo
-        
-        agent = tabview.add("Agent Info")
-        agent_inner = ctk.CTkFrame(agent, fg_color="transparent")
+        # ══════════════════════════════════════════════════════════════
+        agent_tab = tabview.add("Agent Info")
+        agent_inner = ctk.CTkFrame(agent_tab, fg_color="transparent")
         agent_inner.pack(fill="both", expand=True, padx=8, pady=12)
-        
-        # Load current agent info
-        current_agent = load_agent_info(self.db.db_path.parent if self.db else None)
-        
-        # Agent info variables
-        agent_name_var = tk.StringVar(value=current_agent.name)
-        agent_email_var = tk.StringVar(value=current_agent.email)
-        agent_team_var = tk.StringVar(value=current_agent.team)
-        agent_workdays_var = tk.StringVar(value=current_agent.workdays)
-        agent_shift_var = tk.StringVar(value=current_agent.shift)
-        agent_company_var = tk.StringVar(value=current_agent.company)
         
         ctk.CTkLabel(
             agent_inner,
@@ -210,18 +240,18 @@ class PreferencesWindow:
             justify="left",
         ).pack(anchor="w", pady=(0, 12))
         
-        def _agent_row(label: str, var: tk.StringVar, width: int = 300) -> None:
+        def _agent_field(label: str, var: tk.StringVar) -> None:
             row = ctk.CTkFrame(agent_inner, fg_color="transparent")
-            row.pack(fill="x", pady=3)
+            row.pack(fill="x", pady=4)
             ctk.CTkLabel(row, text=label, width=120, anchor="w").pack(side="left")
-            ctk.CTkEntry(row, textvariable=var, width=width).pack(side="left", fill="x", expand=True)
+            ctk.CTkEntry(row, textvariable=var, width=280).pack(side="left", padx=(0, 8))
         
-        _agent_row("Agent Name:", agent_name_var)
-        _agent_row("Agent Email:", agent_email_var)
-        _agent_row("Agent Team:", agent_team_var)
-        _agent_row("Workdays:", agent_workdays_var)
-        _agent_row("Shift:", agent_shift_var)
-        _agent_row("Company:", agent_company_var)
+        _agent_field("Agent Name:", agent_name_var)
+        _agent_field("Agent Email:", agent_email_var)
+        _agent_field("Agent Team:", agent_team_var)
+        _agent_field("Workdays:", agent_workdays_var)
+        _agent_field("Shift:", agent_shift_var)
+        _agent_field("Company:", agent_company_var)
         
         ctk.CTkLabel(
             agent_inner,
@@ -232,8 +262,14 @@ class PreferencesWindow:
             justify="left",
         ).pack(anchor="w", pady=(12, 0))
 
-        # ── Button callbacks and creation ──
+        # ══════════════════════════════════════════════════════════════
+        # ── Bottom Buttons ──
+        # ══════════════════════════════════════════════════════════════
+        btn_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
+        btn_frame.pack(fill="x", pady=(12, 0))
+
         def _on_save():
+            # Save general config
             cfg.hotkey_create = hk_create_var.get()
             cfg.hotkey_manage = hk_manage_var.get()
             cfg.hotkey_disable = hk_disable_var.get()
@@ -247,15 +283,19 @@ class PreferencesWindow:
             save_config(self.db, cfg)
             
             # Save agent info
-            new_agent = AgentInfo(
-                name=agent_name_var.get(),
-                email=agent_email_var.get(),
-                team=agent_team_var.get(),
-                workdays=agent_workdays_var.get(),
-                shift=agent_shift_var.get(),
-                company=agent_company_var.get(),
-            )
-            save_agent_info(new_agent, self.db.db_path.parent if self.db else None)
+            if agent_info_available and AgentInfo and save_agent_info:
+                try:
+                    new_agent = AgentInfo(
+                        name=agent_name_var.get(),
+                        email=agent_email_var.get(),
+                        team=agent_team_var.get(),
+                        workdays=agent_workdays_var.get(),
+                        shift=agent_shift_var.get(),
+                        company=agent_company_var.get(),
+                    )
+                    save_agent_info(new_agent, data_dir)
+                except Exception as e:
+                    log.warning("Failed to save agent info: %s", e)
             
             # Notify app to reload config
             if self._on_save:
@@ -270,10 +310,8 @@ class PreferencesWindow:
 
         win.bind("<Escape>", lambda _: _on_cancel())
 
-        # Add buttons to btn_row (which was packed earlier)
-        ctk.CTkButton(btn_row, text="Cancel", command=_on_cancel, width=80).pack(
-            side="left", padx=(0, 8)
-        )
-        ctk.CTkButton(btn_row, text="Save", command=_on_save, width=80).pack(side="left")
+        ctk.CTkButton(btn_frame, text="Cancel", command=_on_cancel, width=100, 
+                      fg_color="gray40", hover_color="gray30").pack(side="right", padx=(8, 0))
+        ctk.CTkButton(btn_frame, text="Save", command=_on_save, width=100).pack(side="right")
 
         win.wait_window()
