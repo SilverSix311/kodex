@@ -13,11 +13,16 @@ distribution structure:
     |   +---- kodex_py/
     +---- data/             <- User data (created on first run)
     |   +---- kodex.db
-    +---- kodex.bat         <- Launcher script
-    +---- kodex-gui.vbs     <- No-console launcher
+    +---- extensions/       <- Chrome extension
+    |   +---- chrome/
+    +---- Kodex.exe         <- Main launcher (built by Go, see launcher/)
+    +---- Kodex-Debug.exe   <- Debug launcher with console
 
 Run on a Windows machine:
     python build_embedded.py
+
+The Go launcher executables are built separately by GitHub Actions.
+For local builds, run: cd launcher && go build -o ../dist/kodex/Kodex.exe kodex.go
 
 Requirements:
     - Windows 10+ (or any Windows with Python 3.11+)
@@ -430,66 +435,28 @@ def main():
     data_dir.mkdir(exist_ok=True)
     (data_dir / "timeTracker").mkdir(exist_ok=True)
 
-    # 8. Create launcher scripts
-    print("\n->> Creating launcher scripts...")
-
-    # kodex.bat -- console launcher
-    bat_content = '''@echo off
-setlocal
-set "KODEX_DIR=%~dp0"
-set "PYTHONPATH=%KODEX_DIR%app"
-set "KODEX_DB=%KODEX_DIR%data\\kodex.db"
-set "TCL_LIBRARY=%KODEX_DIR%python\\tcl\\tcl8.6"
-set "TK_LIBRARY=%KODEX_DIR%python\\tcl\\tk8.6"
-
-REM Run Kodex
-"%KODEX_DIR%python\\python.exe" -m kodex_py.cli --db "%KODEX_DB%" %*
-'''
-    (DIST_DIR / "kodex.bat").write_text(bat_content, encoding="utf-8")
-
-    # kodex-run.bat -- run the engine (GUI mode)
-    run_bat = '''@echo off
-setlocal
-set "KODEX_DIR=%~dp0"
-set "PYTHONPATH=%KODEX_DIR%app"
-set "KODEX_DB=%KODEX_DIR%data\\kodex.db"
-set "TCL_LIBRARY=%KODEX_DIR%python\\tcl\\tcl8.6"
-set "TK_LIBRARY=%KODEX_DIR%python\\tcl\\tk8.6"
-
-REM Run Kodex engine with tray icon
-"%KODEX_DIR%python\\pythonw.exe" -m kodex_py.cli --db "%KODEX_DB%" run
-'''
-    (DIST_DIR / "kodex-run.bat").write_text(run_bat, encoding="utf-8")
-
-    # kodex-gui.vbs -- no-console launcher (hides the terminal window)
-    vbs_content = '''Set WshShell = CreateObject("WScript.Shell")
-kodexDir = Replace(WScript.ScriptFullName, WScript.ScriptName, "")
-WshShell.Run Chr(34) & kodexDir & "python\\pythonw.exe" & Chr(34) & _
-    " -m kodex_py.cli --db " & Chr(34) & kodexDir & "data\\kodex.db" & Chr(34) & " run", 0, False
-'''
-    (DIST_DIR / "kodex-gui.vbs").write_text(vbs_content, encoding="utf-8")
-
-    # 9. Create __main__.py for module execution
+    # 8. Create __main__.py for module execution
+    # Note: Launcher executables (Kodex.exe, Kodex-Debug.exe) are built separately
+    # by the Go compiler in the GitHub Actions workflow.
     main_py = '''"""Entry point for python -m kodex_py.cli"""
 from kodex_py.cli import cli
 cli()
 '''
     (app_dir / "kodex_py" / "__main__.py").write_text(main_py, encoding="utf-8")
 
-    # 10. Verify everything works
+    # 9. Verify everything works
     _verify_build(python_exe)
 
-    # 11. Summary
+    # 10. Summary
     total_size = sum(f.stat().st_size for f in DIST_DIR.rglob("*") if f.is_file())
     print("\n" + "=" * 60)
     print("  Build complete!")
     print(f"  Output: {DIST_DIR.resolve()}")
     print(f"  Size:   {total_size / 1024 / 1024:.1f} MB")
     print()
-    print("  To run:")
-    print(f"    {DIST_DIR / 'kodex.bat'} list        (CLI)")
-    print(f"    {DIST_DIR / 'kodex-run.bat'}          (Engine + tray)")
-    print(f"    {DIST_DIR / 'kodex-gui.vbs'}          (Silent launch)")
+    print("  Next steps:")
+    print("    - Build Go launchers (Kodex.exe, Kodex-Debug.exe)")
+    print("    - Or run directly: python\\pythonw.exe -m kodex_py.cli run")
     print("=" * 60)
 
 
