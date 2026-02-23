@@ -1,257 +1,403 @@
-# Kodex — Text Expansion Engine
+# Kodex — Text Expansion & Support Workflow Engine
 
-**Version 3.0** — a full Python rewrite of the original AutoHotkey v2 Kodex.
+**Version 1.0.0** — A powerful text expansion engine built for support teams.
 
-## What Is Kodex?
+Kodex transforms short abbreviations into full responses, auto-fills ticket data from your browser, and tracks time spent on tickets — all from your system tray.
 
-Kodex is a blazing-fast text expansion / hotstring engine. Type a short abbreviation, press a trigger key, and it expands into longer text — from a quick "btw" → "by the way" to multi-paragraph email templates.
+---
 
-## Key Features
+## Features
 
-- **Trie-based matching** — O(k) lookup instead of O(n) substring search
-- **Direct keyboard injection** — no clipboard clobbering, buttery smooth even for long expansions
-- **SQLite storage** — replaces thousands of tiny hex-encoded files with a single database
-- **Bundle system** — organize hotstrings into named categories, enable/disable per-bundle
-- **Variable tokens** — `%c` (clipboard), `%t` (time), `%ds`/`%dl` (dates), `%p` (prompt), `%|` (cursor)
-- **GUI management** — Dear PyGui-based management window, preferences, and dialogs
-- **Freshdesk time tracker** — built-in ticket time tracking with overlay timer
-- **Printable cheatsheet** — generate HTML reference of all hotstrings
-- **Portable packaging** — runs with embedded Python, no installation required
-- **Cross-platform ready** — Windows-first, but architected for macOS/Linux
+### 🚀 Text Expansion
+- **Instant expansion** — Type abbreviations, press trigger key, text expands
+- **Trie-based matching** — O(k) lookup, handles thousands of hotstrings
+- **Direct keyboard injection** — No clipboard clobbering, smooth even for long text
+- **Bundle system** — Organize hotstrings into categories, enable/disable per-bundle
+
+### 🌐 Browser Integration (Chrome Extension)
+- **Freshdesk** — Auto-extract ticket data, customer info, properties
+- **CSR Tool** — Pull account details, balances, security questions
+- **GT3** — Extract grid/region data
+- **Real-time sync** — Variables update as you switch tickets
+
+### ⏱️ Time Tracking
+- **Automatic tracking** — Time logged per-ticket, per-day
+- **AFK detection** — Pauses when workstation locked
+- **CSV export** — Daily logs, weekly archives
+- **Visual timer** — Floating overlay shows active ticket
+
+### 🎨 Modern GUI
+- **Dark theme** — Easy on the eyes (CustomTkinter)
+- **System tray** — Lives quietly until needed
+- **Management window** — Search, edit, organize hotstrings
+- **Preferences** — Customize behavior, view stats
+
+---
 
 ## Quick Start
 
-### Portable (Windows — no Python required)
+### Download & Run (Windows)
 
-1. Download the latest release zip from [Releases](https://github.com/SilverSix311/kodex/releases)
+1. Download the latest release from [Releases](https://github.com/SilverSix311/kodex/releases)
 2. Extract to any folder
-3. Double-click `Kodex.exe` to start
+3. Run `kodex-gui.vbs` (silent) or `kodex-run.bat` (with console)
+4. Look for the Kodex icon in your system tray
 
-### Developer Install
+### Install Chrome Extension
 
-```bash
-# Clone and install
-git clone https://github.com/SilverSix311/kodex.git
-cd kodex
-python -m venv .venv
-source .venv/bin/activate    # Linux/macOS
-# .venv\Scripts\activate     # Windows
-pip install -e ".[dev]"
+1. Open `chrome://extensions/`
+2. Enable "Developer mode"
+3. Click "Load unpacked"
+4. Select the `extensions/chrome/` folder from your Kodex installation
+5. Configure native messaging (see [Chrome Extension Setup](#chrome-extension-setup))
 
-# Run
-kodex run
+---
 
-# Test
-pytest tests/ -v
+## Variable Reference
+
+### Built-in Variables
+
+| Variable | Description | Example |
+|----------|-------------|---------|
+| `%clipboard%` | Clipboard contents | (current clipboard) |
+| `%time%` | Current time | `2:30 PM` |
+| `%time_long%` | Long time format | `14:30:45 PM` |
+| `%date_short%` | Short date | `2/23/2026` |
+| `%date_long%` | Long date | `February 23, 2026` |
+| `%prompt%` | Ask for input | Opens dialog |
+
+### Freshdesk Variables (`%fd_*`)
+
+Automatically populated when viewing a Freshdesk ticket:
+
+**Contact Details:**
+| Variable | Description |
+|----------|-------------|
+| `%fd_contact_name%` | Customer name |
+| `%fd_account_status%` | Account status code |
+| `%fd_account_type%` | Account type (Base, Premium, etc.) |
+| `%fd_paid_support%` | Paid support level |
+| `%fd_agent_id%` | Customer's agent/avatar ID |
+
+**Ticket Properties:**
+| Variable | Description |
+|----------|-------------|
+| `%fd_ticket_id%` | Ticket number |
+| `%fd_subject%` | Ticket subject line |
+| `%fd_status%` | Ticket status (Open, Pending, etc.) |
+| `%fd_priority%` | Priority level |
+| `%fd_type%` | Ticket type |
+| `%fd_group%` | Assigned group |
+| `%fd_agent%` | Assigned agent |
+
+**Custom Fields:**
+| Variable | Description |
+|----------|-------------|
+| `%fd_marketplace%` | Marketplace category |
+| `%fd_marketplace_items%` | Item names |
+| `%fd_marketplace_order_id%` | Order ID |
+| `%fd_purchase_date%` | Purchase date |
+| `%fd_purchase_time%` | Purchase time |
+| `%fd_avatar_name%` | Avatar name |
+| `%fd_error_message%` | Error message |
+| `%fd_region_name%` | Region name |
+| `%fd_store_name%` | Store name |
+| `%fd_related_ticket%` | Related ticket number |
+| `%fd_ip_address%` | Customer IP address |
+
+**Requester Info:**
+| Variable | Description |
+|----------|-------------|
+| `%fd_requester_name%` | Requester display name |
+| `%fd_requester_email%` | Requester email |
+| `%fd_cc_emails%` | CC'd email addresses |
+| `%fd_ticket_description%` | Ticket body text |
+
+### CSR Variables (`%csr_*`)
+
+Populated from CSR tool pages:
+
+| Variable | Description |
+|----------|-------------|
+| `%csr_url%` | CSR page URL |
+| `%csr_usd_bal_due%` | USD balance due |
+| `%csr_usd_balance%` | USD account balance |
+| `%csr_security_question%` | Security question |
+| `%csr_security_answer%` | Security answer |
+
+### GT3 Variables (`%gt3_*`)
+
+Populated from GT3 pages:
+
+| Variable | Description |
+|----------|-------------|
+| `%gt3_grid%` | Grid name |
+| `%gt3_region%` | Region name |
+| `%gt3_estate%` | Estate name |
+| `%gt3_coordinates%` | Region coordinates |
+
+### Agent Info Variables (`%agent_*`)
+
+Set in Preferences → Agent Info:
+
+| Variable | Description |
+|----------|-------------|
+| `%agent_name%` | Your display name |
+| `%agent_id%` | Your agent ID |
+| `%agent_email%` | Your email |
+
+### Time Tracking Variables
+
+| Variable | Description |
+|----------|-------------|
+| `%ticket_time%` | Seconds on current ticket |
+| `%ticket_time_formatted%` | Time as `HH:MM:SS` |
+
+---
+
+## Chrome Extension Setup
+
+The Chrome extension captures ticket data and sends it to Kodex via native messaging.
+
+### 1. Register the Native Host
+
+Run this in PowerShell (as Administrator):
+
+```powershell
+# Find your Kodex installation path
+$kodexPath = "C:\path\to\kodex"
+
+# Create the native host manifest
+$manifest = @{
+    name = "com.kodex.context"
+    description = "Kodex Context Bridge"
+    path = "$kodexPath\extensions\chrome\native_host.bat"
+    type = "stdio"
+    allowed_origins = @("chrome-extension://YOUR_EXTENSION_ID/")
+} | ConvertTo-Json
+
+# Write manifest to registry location
+$manifestPath = "$env:LOCALAPPDATA\Kodex\com.kodex.context.json"
+New-Item -Path (Split-Path $manifestPath) -ItemType Directory -Force
+$manifest | Out-File -FilePath $manifestPath -Encoding UTF8
+
+# Register in Windows Registry
+$regPath = "HKCU:\Software\Google\Chrome\NativeMessagingHosts\com.kodex.context"
+New-Item -Path $regPath -Force
+Set-ItemProperty -Path $regPath -Name "(Default)" -Value $manifestPath
 ```
 
-## CLI Reference
+### 2. Get Your Extension ID
 
-```
-kodex run                         Start engine + system tray
-kodex list                        List all hotstrings
-kodex add NAME REPLACEMENT        Add a hotstring
-kodex remove NAME                 Remove a hotstring
-kodex bundles                     List bundles
-kodex bundle-create NAME          Create a bundle
-kodex bundle-toggle NAME          Enable/disable a bundle
-kodex bundle-delete NAME          Delete a bundle
-kodex migrate LEGACY_DIR          Migrate from AHK Kodex
-kodex import-bundle FILE.kodex    Import a .kodex bundle
-kodex export-bundle NAME FILE     Export a bundle
-kodex stats                       Show expansion stats
-kodex cheatsheet [FILE]           Generate HTML cheatsheet
-kodex time-log [-d DATE]          Show ticket time log
-```
+1. Go to `chrome://extensions/`
+2. Find "Kodex Context Bridge"
+3. Copy the ID (looks like `abcdefghijklmnopqrstuvwxyz123456`)
+4. Update the `allowed_origins` in the manifest above
 
-## GUI Features
+### 3. Reload & Test
 
-### System Tray
+1. Reload the extension in `chrome://extensions/`
+2. Open a Freshdesk ticket
+3. Check Kodex → Tools → View Variables
+4. You should see `%fd_*` variables populated
 
-Right-click the tray icon for:
-- **Manage Hotstrings** — full management window
-- **Create New Hotstring** — quick-add dialog
-- **Preferences** — settings and statistics
-- **Ticket Tracker** — start/stop time tracking
-- **Disable/Enable** — toggle hotstring matching
+---
+
+## Time Tracking
+
+### How It Works
+
+1. **Automatic detection** — When you view a Freshdesk ticket, tracking starts
+2. **Per-ticket, per-day** — Time is logged separately for each ticket each day
+3. **AFK-aware** — Tracking pauses when your workstation is locked
+4. **Shift cutoff** — Tracking stops at 5:50 PM (configurable)
+
+### Viewing Time
+
+- **Tray menu** → Time Tracking — Opens the time tracking window
+- **Daily totals** — See time per ticket for any date
+- **Export CSV** — Download logs for reporting
+
+### Time Tracking Window
+
+| Column | Description |
+|--------|-------------|
+| Ticket | Ticket number |
+| Time | Total time (HH:MM:SS) |
+| Source | Where it came from (freshdesk, csr, gt3) |
+| Last Seen | Last activity timestamp |
+
+---
+
+## GUI Reference
+
+### System Tray Menu
+
+| Menu Item | Action |
+|-----------|--------|
+| Manage Hotstrings | Open management window |
+| Create New Hotstring | Quick-add dialog |
+| Preferences | Settings, stats, agent info |
+| Start Ticket Tracker | Manual tracking toggle |
+| Time Tracking | View/export time logs |
+| Disable/Enable | Toggle all hotstrings |
+| Exit | Quit Kodex |
 
 ### Management Window
 
-- Tab-per-bundle navigation
-- Search/filter hotstrings
-- Inline editing of name, replacement text, triggers, script mode
-- Bundle management (create, rename, delete)
-- Import/export bundles (`.kodex` format)
-- Generate printable cheatsheet
+- **Tabs** — One per bundle (Default, CSR Notes, etc.)
+- **Search** — Filter by name or replacement text
+- **Edit** — Click a hotstring to modify
+- **Triggers** — Space, Tab, Enter, or Instant
+- **Script Mode** — For complex expansions with logic
 
-### Hotkey Defaults
+### Preferences Window
 
-| Hotkey | Function |
-|--------|----------|
+- **General** — Hotkeys, sounds, startup behavior
+- **Agent Info** — Your name, ID, email for `%agent_*` variables
+- **Statistics** — Expansions count, characters saved
+
+### View Variables (Tools Menu)
+
+Shows all currently available variables:
+- Built-in (`%clipboard%`, `%time%`, etc.)
+- Freshdesk context (`%fd_*`)
+- CSR context (`%csr_*`)
+- GT3 context (`%gt3_*`)
+- Global variables (user-defined)
+
+---
+
+## CLI Reference
+
+```bash
+kodex run                         # Start engine + tray
+kodex list                        # List all hotstrings
+kodex add NAME REPLACEMENT        # Add hotstring
+kodex remove NAME                 # Remove hotstring
+kodex bundles                     # List bundles
+kodex bundle-create NAME          # Create bundle
+kodex bundle-toggle NAME          # Enable/disable bundle
+kodex stats                       # Show statistics
+kodex cheatsheet [FILE]           # Generate HTML reference
+kodex time-log [-d DATE]          # View time log
+```
+
+---
+
+## File Locations
+
+### Portable Mode (Recommended)
+
+When running from the distribution folder:
+
+```
+kodex/
+├── data/
+│   ├── kodex.db                  # Hotstring database
+│   ├── freshdesk_context.json    # Current Freshdesk data
+│   ├── csr_context.json          # Current CSR data
+│   ├── gt3_context.json          # Current GT3 data
+│   ├── time_tracking.json        # Time tracking state
+│   ├── global_variables.json     # User-defined variables
+│   ├── agent_info.json           # Agent preferences
+│   └── timeTracker/              # CSV exports
+├── extensions/
+│   └── chrome/                   # Browser extension
+├── python/                       # Embedded Python runtime
+├── app/                          # Application code
+└── kodex-gui.vbs                 # Launch script
+```
+
+### Installed Mode
+
+When installed system-wide, data goes to:
+- Windows: `%USERPROFILE%\.kodex\`
+- Linux/macOS: `~/.kodex/`
+
+---
+
+## Hotkeys
+
+| Hotkey | Action |
+|--------|--------|
 | `Ctrl+Shift+H` | Create new hotstring |
 | `Ctrl+Shift+M` | Open management window |
-| `Ctrl+Shift+T` | Start/stop ticket tracker |
+| `Ctrl+Shift+T` | Toggle ticket tracker |
 
-## Freshdesk Ticket Time Tracker
+---
 
-Track time spent on support tickets:
+## Building from Source
 
-1. Copy a Freshdesk ticket URL to clipboard
-2. Press `Ctrl+Shift+T` to start tracking
-3. A floating overlay shows the ticket number and elapsed time
-4. Press `Ctrl+Shift+T` again to stop and log the time
+### Requirements
 
-Time entries are stored as CSV files in `data/timeTracker/` with the format:
-```
-ticket_number,Status,YYYY-MM-DD HH:MM:SS,duration_hours
-```
+- Python 3.11+
+- Windows 10+ (for full functionality)
+- tkinter (included with Python on Windows)
 
-View the log:
+### Development Setup
+
 ```bash
-kodex time-log            # Today's entries
-kodex time-log -d 2026-02-03  # Specific date
+git clone https://github.com/SilverSix311/kodex.git
+cd kodex
+python -m venv .venv
+.venv\Scripts\activate
+pip install -e ".[dev]"
+kodex run
 ```
 
-## Variable Tokens
-
-Use these in replacement text:
-
-| Token | Replacement | Example |
-|-------|-------------|---------|
-| `%c` | Clipboard contents | Insert clipboard inline |
-| `%t` | Current time | `2:30 PM` |
-| `%ds` | Short date | `2/3/2026` |
-| `%dl` | Long date | `February 3, 2026` |
-| `%tl` | Long time | `14:30:45 PM` |
-| `%p` | User prompt | Opens a dialog for input |
-| `%\|` | Cursor position | Places cursor after expansion |
-| `%var_name%` | Global/ticket variable | See Global Variables below |
-
-## Global Variables
-
-Define reusable variables that can be used across all hotstrings.
-
-### Setup
-
-Access Global Variables via **Tools → Global Variables** in the Management window, or through the **Variables** tab in Preferences.
-
-### Variable Types
-
-| Type | Example Value | Description |
-|------|---------------|-------------|
-| `string` | `"Acme Corp"` | Text value |
-| `int` | `42` | Integer number |
-| `decimal` | `0.07` | Decimal number |
-| `boolean` | `true` | True/false value |
-| `array` | `["A", "B", "C"]` | JSON array |
-| `dict` | `{"key": "value"}` | JSON object |
-
-### Usage in Hotstrings
-
-Use `%variable_name%` syntax in your replacement text:
-
-```
-Hello %company_name%,
-
-Thank you for contacting us about ticket #%ticket_id%.
-
-Best regards,
-%my_name%
-```
-
-### Ticket Context (Freshdesk Integration)
-
-If you use the Freshdesk browser extension, ticket-specific variables are automatically loaded from `freshdesk_context.json`. These override global variables with the same name.
-
-**Priority:** `freshdesk_context.json` > `global_variables.json`
-
-Common ticket context variables:
-- `%ticket_id%` — Ticket number
-- `%requester_name%` — Customer name
-- `%subject%` — Ticket subject
-- `%status%` — Ticket status
-
-### Storage
-
-Variables are stored in `~/.kodex/global_variables.json`:
-
-```json
-{
-  "variables": {
-    "company_name": {"type": "string", "value": "Acme Corp"},
-    "ticket_count": {"type": "int", "value": 42},
-    "tax_rate": {"type": "decimal", "value": 0.07},
-    "is_premium": {"type": "boolean", "value": true}
-  }
-}
-```
-
-The file is automatically watched for changes — edit it manually or through the GUI, and changes apply immediately.
-
-## Architecture
-
-```
-kodex-py/
-├── src/kodex_py/
-│   ├── engine/
-│   │   ├── matcher.py        ← Trie-based hotstring matching
-│   │   ├── input_monitor.py  ← Keyboard hook (pynput)
-│   │   ├── executor.py       ← Expansion + variable substitution
-│   │   └── sender.py         ← Direct keystroke injection
-│   ├── storage/
-│   │   ├── database.py       ← SQLite CRUD
-│   │   ├── migration.py      ← Legacy AHK data importer
-│   │   ├── bundle_io.py      ← .kodex file import/export
-│   │   └── models.py         ← Data classes
-│   ├── gui/
-│   │   ├── manager.py        ← Management window
-│   │   ├── editor.py         ← New hotstring dialog
-│   │   ├── preferences.py    ← Preferences window
-│   │   ├── global_variables.py ← Global variables UI
-│   │   ├── cheatsheet.py     ← HTML cheatsheet generator
-│   │   └── prompt.py         ← %p variable prompt
-│   ├── plugins/
-│   │   └── ticket_tracker.py ← Freshdesk time tracker
-│   ├── utils/
-│   │   ├── hex_codec.py      ← Legacy hex encode/decode
-│   │   ├── variables.py      ← Token substitution
-│   │   └── global_variables.py ← Global/ticket variable management
-│   ├── app.py                ← Application orchestrator
-│   ├── cli.py                ← Click-based CLI
-│   ├── config.py             ← Configuration management
-│   └── tray.py               ← System tray (pystray + tkinter GUI)
-├── tests/                    ← pytest test suite
-├── build_embedded.py         ← Embedded Python build script
-├── build.bat                 ← Windows build launcher
-├── BUILD.md                  ← Build documentation
-└── pyproject.toml
-```
-
-## Building a Portable Distribution
-
-See [BUILD.md](BUILD.md) for full details.
+### Build Portable Distribution
 
 ```cmd
-# On Windows with Python 3.11+
 build.bat
 ```
 
-This creates `dist/kodex/` with embedded Python — zip it up and distribute.
+Creates `dist/kodex/` with embedded Python — zip and distribute.
 
-## Migration from AHK
+See [BUILD.md](BUILD.md) for detailed build instructions.
 
-The `kodex migrate` command reads the legacy directory structure:
-- Hex-encoded `.txt` replacement files
-- Double-comma-separated bank files (`enter.csv`, `tab.csv`, etc.)
-- `kodex.ini` settings
-- Bundle subdirectories
+---
 
-```bash
-kodex migrate /path/to/old/kodex-dir
-```
+## Troubleshooting
 
-Everything is imported into a single `kodex.db` SQLite database.
+### Variables not populating
+
+1. Check the Chrome extension is loaded and enabled
+2. Refresh the Freshdesk/CSR/GT3 page
+3. Check Tools → View Variables in Kodex
+4. Look at `data/native_messaging.log` for errors
+
+### Time not tracking
+
+1. Ensure Kodex is running (check system tray)
+2. Make sure it's before 5:50 PM
+3. Check if workstation was locked (pauses tracking)
+4. View Time Tracking window for current state
+
+### Hotstrings not expanding
+
+1. Check if Kodex is enabled (tray icon should be normal, not grayed)
+2. Verify the trigger key (Space, Tab, Enter, or Instant)
+3. Check if the bundle is enabled
+4. Try restarting Kodex
+
+### Chrome extension not connecting
+
+1. Verify native host is registered (check Registry)
+2. Check the extension ID matches `allowed_origins`
+3. Look at `data/native_messaging.log`
+4. Try reloading the extension
+
+---
 
 ## License
 
-MIT
+MIT License — see [LICENSE](LICENSE) for details.
+
+---
+
+## Credits
+
+Built by [SilverSix311](https://github.com/SilverSix311) with assistance from [Silas Vane](https://github.com/SilasVane).
+
+Originally inspired by AutoHotkey, rebuilt in Python for portability and extensibility.
