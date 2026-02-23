@@ -33,6 +33,12 @@ VARIABLE_PATTERN = re.compile(r"%([a-zA-Z_][a-zA-Z0-9_]*)%")
 # Known context sources (order doesn't matter for logic, but handy to have them listed)
 KNOWN_SOURCES = ("freshdesk", "csr", "gt3")
 
+# Source aliases (short prefix -> canonical source name)
+# Allows %fd_ticket_id% to resolve to freshdesk_context.json
+SOURCE_ALIASES = {
+    "fd": "freshdesk",
+}
+
 
 def _parse_updated_at(context: dict) -> datetime | None:
     """Parse ``_updated_at`` from a context dict, returning None on failure."""
@@ -209,11 +215,15 @@ class GlobalVariables:
           4. global_variables.json
         """
         # ── 1. Source-prefixed lookup ──────────────────────────────
-        for src in KNOWN_SOURCES:
-            prefix = f"{src}_"
+        # Check both canonical names (freshdesk_, csr_, gt3_) and aliases (fd_)
+        all_prefixes = [(src, src) for src in KNOWN_SOURCES]
+        all_prefixes += [(alias, canonical) for alias, canonical in SOURCE_ALIASES.items()]
+        
+        for prefix_name, canonical_src in all_prefixes:
+            prefix = f"{prefix_name}_"
             if name.startswith(prefix):
                 field = name[len(prefix):]
-                ctx = self._contexts.get(src, {})
+                ctx = self._contexts.get(canonical_src, {})
                 if field in ctx:
                     return ctx[field]
                 # Prefixed name matched a source but field not found — don't
@@ -221,8 +231,9 @@ class GlobalVariables:
                 break
 
         # ── 2. Unprefixed context lookup (most-recent source) ──────
-        # Only do this when the name doesn't start with a known source prefix.
-        has_source_prefix = any(name.startswith(f"{src}_") for src in KNOWN_SOURCES)
+        # Only do this when the name doesn't start with a known source prefix or alias.
+        all_prefix_names = list(KNOWN_SOURCES) + list(SOURCE_ALIASES.keys())
+        has_source_prefix = any(name.startswith(f"{p}_") for p in all_prefix_names)
         if not has_source_prefix:
             recent_ctx = self._most_recent_context()
             if name in recent_ctx:

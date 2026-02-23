@@ -4,13 +4,18 @@
  * Extracts ticket context from Freshdesk ticket detail pages and
  * sends it to the background service worker.
  *
- * Extracted fields:
- *   - ticket_number    (from URL: /tickets/12345)
- *   - subject          (ticket title)
- *   - customer_name    (requester name)
- *   - customer_email   (requester email)
- *   - status           (e.g. "Open", "Pending", "Resolved")
- *   - priority         (e.g. "Low", "Medium", "High", "Urgent")
+ * Extracted fields (26 total):
+ *   Contact Details:
+ *     - contact_name, account_status, account_type, paid_support, agent_id
+ *   Ticket Properties:
+ *     - type, marketplace, marketplace_items, marketplace_order_id
+ *     - purchase_date, purchase_time, avatar_name, error_message
+ *     - region_name, store_name, status, priority, group, agent
+ *     - related_ticket, ip_address
+ *   Ticket Header:
+ *     - ticket_id, subject
+ *   Requester/Conversation:
+ *     - requester_name, requester_email, cc_emails, ticket_description
  */
 
 (function () {
@@ -19,11 +24,10 @@
   const SOURCE = "freshdesk";
   
   // ── Timing configuration ───────────────────────────────────────────────────
-  // Delays ensure page content is fully loaded before extraction
-  const INITIAL_DELAY_MS = 800;      // Wait after page load before first extraction
-  const FOCUS_DELAY_MS = 500;        // Wait after tab focus/visibility change
-  const SPA_NAV_DELAY_MS = 800;      // Wait after SPA navigation detected
-  const DEBOUNCE_MS = 800;           // Debounce multiple rapid triggers
+  const INITIAL_DELAY_MS = 800;
+  const FOCUS_DELAY_MS = 500;
+  const SPA_NAV_DELAY_MS = 800;
+  const DEBOUNCE_MS = 800;
 
   // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -37,67 +41,141 @@
     return el ? el.textContent.trim() : null;
   }
 
+  function getInputValue(selector) {
+    const el = document.querySelector(selector);
+    return el ? (el.value || "").trim() : null;
+  }
+
   function getAttr(selector, attr) {
     const el = document.querySelector(selector);
     return el ? (el.getAttribute(attr) || "").trim() : null;
+  }
+
+  // Get text from contact details widget by field name
+  function getContactField(fieldName) {
+    const selector = `[data-test-id="requester-info-contact-${fieldName}"] .info-details-content`;
+    return getText(selector);
+  }
+
+  // Get dropdown selection from ticket properties
+  function getPropertyDropdown(testId) {
+    const selector = `[data-test-id="tkt-properties-${testId}"] .ember-power-select-selected-item`;
+    return getText(selector);
+  }
+
+  // Get dropdown from generic data-test-id
+  function getDropdown(testId) {
+    const selector = `[data-test-id="${testId}"] .ember-power-select-selected-item`;
+    let text = getText(selector);
+    // If no selection, check for placeholder
+    if (!text) {
+      const placeholder = getText(`[data-test-id="${testId}"] .custom-placeholder`);
+      if (placeholder && placeholder !== "--") text = placeholder;
+    }
+    return text;
   }
 
   // ── Context extraction ─────────────────────────────────────────────────────
 
   function extractContext() {
     const ticketNumber = getTicketNumber();
-    if (!ticketNumber) return null; // Not a ticket page
+    if (!ticketNumber) return null;
 
-    // Subject / title — try multiple selectors for robustness across FD versions
-    const subject =
-      getText(".ticket-title") ||
+    // ── Contact Details (right sidebar widget) ───────────────────────────────
+    const contactName = 
+      getText(".widget-requestor-info") ||
+      getText('[data-test-id="user-name"]') ||
+      null;
+    
+    const accountStatus = getContactField("account_status");
+    const accountType = getContactField("account_type");
+    const paidSupport = getContactField("paid_support");
+    const agentId = getContactField("agent_id");
+
+    // ── Ticket Properties (left sidebar form) ────────────────────────────────
+    const ticketType = getPropertyDropdown("ticket_type");
+    const marketplace = getPropertyDropdown("marketplace");
+    const marketplaceItems = getInputValue('input[name="customFields.marketplace_items"]');
+    const marketplaceOrderId = getInputValue('input[name="customFields.marketplace_order_id"]');
+    const purchaseDate = getInputValue('input[name="customFields.purchase_date"]') ||
+                         getAttr('input[id^="freshcalendar-input"]', 'aria-label');
+    const purchaseTime = getInputValue('input[name="customFields.purchase_time"]');
+    const avatarName = getInputValue('input[name="customFields.avatar_name"]');
+    const errorMessage = getInputValue('input[name="customFields.error_message"]');
+    const regionName = getInputValue('input[name="customFields.region_name"]');
+    const storeName = getInputValue('input[name="customFields.cf_store_name"]');
+    const relatedTicket = getInputValue('input[name="customFields.related_ticket_number"]');
+    const ipAddress = getInputValue('input[name="customFields.ip_address"]');
+
+    const status = getPropertyDropdown("status") ||
+                   getText('[data-test-id="ticket-status"]');
+    
+    const priority = getDropdown("priority") ||
+                     getText('[data-test-id="ticket-priority"]');
+    
+    const group = getDropdown("Group");
+    const agent = getDropdown("Agent");
+
+    // ── Ticket Header ────────────────────────────────────────────────────────
+    const subject = 
+      getText(".ticket-subject-heading") ||
       getText('[data-test-id="ticket-title"]') ||
-      getText(".subject") ||
-      getText("h1.ticket-heading") ||
       document.title.replace(/^\[#\d+\]\s*/, "").trim() ||
       null;
 
-    // Requester name
-    const customerName =
-      getText(".requester-name") ||
-      getText('[data-test-id="requester-name"]') ||
-      getText(".contact-name") ||
-      getText(".requester .name") ||
-      null;
-
-    // Requester email — often in an href or data attribute
-    const customerEmail =
+    // ── Requester / Conversation ─────────────────────────────────────────────
+    const requesterName = 
+      getText('.sender-info [data-test-id="user-name"]') ||
+      getText('.requester-wrap [data-test-id="user-name"]') ||
+      contactName;
+    
+    // Email often derived from agent_id for SL
+    const requesterEmail = 
       getAttr('a[href^="mailto:"]', "href")?.replace("mailto:", "") ||
-      getText(".requester-email") ||
-      getText('[data-test-id="requester-email"]') ||
-      getText(".contact-email") ||
-      null;
-
-    // Status badge
-    const status =
-      getText(".ticket-status-badge") ||
-      getText('[data-test-id="ticket-status"]') ||
-      getText(".status-badge") ||
-      getText(".ticket-status") ||
-      null;
-
-    // Priority badge
-    const priority =
-      getText(".ticket-priority-badge") ||
-      getText('[data-test-id="ticket-priority"]') ||
-      getText(".priority-badge") ||
-      getText(".priority-label") ||
-      null;
+      (agentId ? `${agentId}@secondlife.com` : null);
+    
+    const ccEmails = getText('.emails-info .display_emails');
+    
+    const ticketDescription = getText('#ticket_original_request');
 
     return {
       source: SOURCE,
-      ticket_number: ticketNumber,
+      url: window.location.href,
+      
+      // Ticket Header
+      ticket_id: ticketNumber,
       subject: subject,
-      customer_name: customerName,
-      customer_email: customerEmail,
+      
+      // Contact Details
+      contact_name: contactName,
+      account_status: accountStatus,
+      account_type: accountType,
+      paid_support: paidSupport,
+      agent_id: agentId,
+      
+      // Ticket Properties
+      type: ticketType,
+      marketplace: marketplace,
+      marketplace_items: marketplaceItems,
+      marketplace_order_id: marketplaceOrderId,
+      purchase_date: purchaseDate,
+      purchase_time: purchaseTime,
+      avatar_name: avatarName,
+      error_message: errorMessage,
+      region_name: regionName,
+      store_name: storeName,
       status: status,
       priority: priority,
-      url: window.location.href,
+      group: group,
+      agent: agent,
+      related_ticket: relatedTicket,
+      ip_address: ipAddress,
+      
+      // Requester / Conversation
+      requester_name: requesterName,
+      requester_email: requesterEmail,
+      cc_emails: ccEmails,
+      ticket_description: ticketDescription,
     };
   }
 
