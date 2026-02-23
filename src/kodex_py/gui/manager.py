@@ -44,7 +44,7 @@ def _set_window_icon(window, db: "Database" = None) -> None:
     # Try database-relative path first (for portable mode)
     if db is not None:
         try:
-            candidate = Path(db.db_path).parent / "resources" / "kodex.ico"
+            candidate = Path(db.path).parent / "resources" / "kodex.ico"
             if candidate.exists():
                 icon_path = candidate
         except Exception:
