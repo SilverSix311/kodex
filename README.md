@@ -40,7 +40,7 @@ Kodex transforms short abbreviations into full responses, auto-fills ticket data
 
 1. Download the latest release from [Releases](https://github.com/SilverSix311/kodex/releases)
 2. Extract to any folder
-3. Run `kodex-gui.vbs` (silent) or `kodex-run.bat` (with console)
+3. Run `Kodex.exe` (or `Kodex-Debug.exe` if you need console output)
 4. Look for the Kodex icon in your system tray
 
 ### Install Chrome Extension
@@ -306,7 +306,8 @@ kodex/
 │   └── chrome/                   # Browser extension
 ├── python/                       # Embedded Python runtime
 ├── app/                          # Application code
-└── kodex-gui.vbs                 # Launch script
+├── Kodex.exe                     # Main launcher (silent)
+└── Kodex-Debug.exe               # Debug launcher (with console)
 ```
 
 ### Installed Mode
@@ -352,7 +353,7 @@ kodex run
 build.bat
 ```
 
-Creates `dist/kodex/` with embedded Python — zip and distribute.
+Creates `dist/kodex/` with embedded Python. The GitHub Actions workflow also builds the Go launcher executables (`Kodex.exe`, `Kodex-Debug.exe`).
 
 See [BUILD.md](BUILD.md) for detailed build instructions.
 
