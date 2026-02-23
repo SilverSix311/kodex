@@ -87,11 +87,16 @@ def run_tray(app: "KodexApp") -> None:
 
     # ── Set window icon ──────────────────────────────────────────────
     ico_path = app.db_path.parent / "resources" / "kodex.ico"
+    log.info("Tray icon check: db_path=%s, ico_path=%s, exists=%s", 
+             app.db_path, ico_path, ico_path.exists())
     if ico_path.exists():
         try:
             root.iconbitmap(str(ico_path))
-        except Exception:
-            pass  # Fallback to default if icon fails
+            log.info("Root window icon set successfully")
+        except Exception as e:
+            log.warning("Failed to set root window icon: %s", e)
+    else:
+        log.warning("Icon file not found at: %s", ico_path)
 
     # ── Cached GUI window instances ──────────────────────────────────
     _management_window: list = [None]   # list so lambda can rebind

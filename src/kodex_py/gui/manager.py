@@ -45,10 +45,14 @@ def _set_window_icon(window, db: "Database" = None) -> None:
     if db is not None:
         try:
             candidate = Path(db.path).parent / "resources" / "kodex.ico"
+            log.info("Icon check: db.path=%s, candidate=%s, exists=%s", 
+                     db.path, candidate, candidate.exists())
             if candidate.exists():
                 icon_path = candidate
-        except Exception:
-            pass
+        except Exception as e:
+            log.warning("Icon db-relative path error: %s", e)
+    else:
+        log.info("Icon check: db is None")
     
     # Fallback: package resources
     if icon_path is None:
@@ -56,17 +60,23 @@ def _set_window_icon(window, db: "Database" = None) -> None:
             import kodex_py
             pkg_dir = Path(kodex_py.__file__).parent.parent
             candidate = pkg_dir / "resources" / "kodex.ico"
+            log.info("Icon fallback check: pkg_dir=%s, candidate=%s, exists=%s",
+                     pkg_dir, candidate, candidate.exists())
             if candidate.exists():
                 icon_path = candidate
-        except Exception:
-            pass
+        except Exception as e:
+            log.warning("Icon fallback error: %s", e)
     
     # Apply icon if found
     if icon_path is not None:
         try:
+            log.info("Setting window icon to: %s", icon_path)
             window.iconbitmap(str(icon_path))
+            log.info("Window icon set successfully")
         except Exception as e:
-            log.debug("Could not set window icon: %s", e)
+            log.warning("Could not set window icon: %s", e)
+    else:
+        log.warning("No icon found for window")
 
 
 class ManagementWindow:
