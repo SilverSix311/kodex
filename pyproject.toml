@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "kodex"
-version = "3.0.0"
+version = "1.0.1"
 description = "A blazing-fast text expansion / hotstring engine for Windows (and eventually cross-platform)"
 readme = "README.md"
 license = "MIT"
